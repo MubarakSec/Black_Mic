@@ -33,31 +33,45 @@ const io = new Server(server, {
   }
 });
 
+// Secure Room ID validation utility (matches /^[A-Z0-9]{3,12}$/ as per AGENTS.md)
+const validateRoomId = (roomId) => {
+  return typeof roomId === 'string' && /^[A-Z0-9]{3,12}$/.test(roomId);
+};
+
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
   socket.on('join-room', (roomId) => {
+    if (!validateRoomId(roomId)) {
+      console.warn(`Blocked invalid join-room attempt: "${roomId}" from socket ${socket.id}`);
+      return;
+    }
     socket.join(roomId);
-    console.log('Client joined:', roomId);
+    console.log(`Client ${socket.id} joined room: ${roomId}`);
   });
 
   socket.on('receiver-ready', (roomId) => {
+    if (!validateRoomId(roomId)) return;
     socket.to(roomId).emit('receiver-ready');
   });
 
   socket.on('pcm-chunk', (chunk, roomId) => {
+    if (!validateRoomId(roomId)) return;
     socket.to(roomId).emit('pcm-chunk', chunk);
   });
 
   socket.on('offer', (offer, roomId) => {
+    if (!validateRoomId(roomId)) return;
     socket.to(roomId).emit('offer', offer);
   });
 
   socket.on('answer', (answer, roomId) => {
+    if (!validateRoomId(roomId)) return;
     socket.to(roomId).emit('answer', answer);
   });
 
   socket.on('ice-candidate', (candidate, roomId) => {
+    if (!validateRoomId(roomId)) return;
     socket.to(roomId).emit('ice-candidate', candidate);
   });
 

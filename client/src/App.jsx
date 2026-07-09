@@ -7,11 +7,29 @@ import TelemetryStrip from './components/TelemetryStrip';
 import VisualizerPanel from './components/VisualizerPanel';
 import LoggerPanel from './components/LoggerPanel';
 import RecordingLibrary from './components/RecordingLibrary';
+import {
+  DEFAULT_ROOM_ID,
+  TELEMETRY_POLL_INTERVAL_MS,
+  WATCHDOG_CHECK_INTERVAL_MS,
+  SILENCE_THRESHOLD_MS,
+  MICROPHONE_SAMPLE_RATE,
+  LATENCY_HINT,
+  ALARM_INTERVAL_MS,
+  ALARM_PITCH_HZ,
+  ALARM_BEEP_DURATION_SEC,
+  UNLOCK_NOTE_1_HZ,
+  UNLOCK_NOTE_2_HZ,
+  FFT_SIZE,
+  RECORDING_FRAME_RATE,
+  RECORDING_WIDTH,
+  RECORDING_HEIGHT,
+  RECORDING_BIT_RATE
+} from './constants';
 import './index.css';
 
 function App() {
   const [role, setRole] = useState(null); // 'sender' | 'receiver'
-  const [roomId, setRoomId] = useState('ROOM');
+  const [roomId, setRoomId] = useState(DEFAULT_ROOM_ID);
   const [status, setStatus] = useState('Waiting to connect...');
   const [volume, setVolume] = useState(0);
   const [logs, setLogs] = useState([]);
@@ -126,7 +144,7 @@ function App() {
         setBitrate(kbps);
         bytesCountRef.current = 0;
       }
-    }, 1000);
+    }, TELEMETRY_POLL_INTERVAL_MS);
 
     return () => {
       clearInterval(interval);
@@ -143,7 +161,7 @@ function App() {
     const watchdog = setInterval(() => {
       if (hasConnectedOnceRef.current && roleRef.current === 'receiver') {
         const silenceDuration = Date.now() - lastChunkTimeRef.current;
-        if (silenceDuration > 2500) {
+        if (silenceDuration > SILENCE_THRESHOLD_MS) {
           if (!isSignalLost) {
             setIsSignalLost(true);
             setStatus('⚠️ Microphone disconnected!');
@@ -155,7 +173,7 @@ function App() {
           }
         }
       }
-    }, 1000);
+    }, WATCHDOG_CHECK_INTERVAL_MS);
 
     return () => {
       clearInterval(watchdog);
@@ -170,10 +188,10 @@ function App() {
     // Play initial alert beep
     playAlarmBeep();
 
-    // Pulse alarm sound every 1.2 seconds
+    // Pulse alarm sound every ALARM_INTERVAL_MS
     const alarmInterval = setInterval(() => {
       playAlarmBeep();
-    }, 1200);
+    }, ALARM_INTERVAL_MS);
 
     return () => clearInterval(alarmInterval);
   }, [isSignalLost, role]);
@@ -227,18 +245,18 @@ function App() {
       const gain = ctx.createGain();
       
       osc.type = 'sawtooth'; // piercing synthesizer alert sound
-      osc.frequency.setValueAtTime(880, ctx.currentTime); // A5 note
+      osc.frequency.setValueAtTime(ALARM_PITCH_HZ, ctx.currentTime);
       
       // Fast fade out to create a pulsing beep
       gain.gain.setValueAtTime(0.15, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.4);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + (ALARM_BEEP_DURATION_SEC - 0.1));
       
       osc.connect(gain);
       // Connect directly to destination speakers (bypass fader so user always hears alarm)
       gain.connect(ctx.destination);
       
       osc.start();
-      osc.stop(ctx.currentTime + 0.5);
+      osc.stop(ctx.currentTime + ALARM_BEEP_DURATION_SEC);
     } catch (e) {
       console.error('Failed to play alarm beep:', e);
     }
@@ -253,7 +271,7 @@ function App() {
       // Beep 1 (C5)
       const osc1 = ctx.createOscillator();
       const gain1 = ctx.createGain();
-      osc1.frequency.setValueAtTime(523.25, ctx.currentTime); 
+      osc1.frequency.setValueAtTime(UNLOCK_NOTE_1_HZ, ctx.currentTime); 
       gain1.gain.setValueAtTime(0.08, ctx.currentTime);
       gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
       osc1.connect(gain1);
@@ -264,7 +282,7 @@ function App() {
       // Beep 2 (E5, delayed by 100ms)
       const osc2 = ctx.createOscillator();
       const gain2 = ctx.createGain();
-      osc2.frequency.setValueAtTime(659.25, ctx.currentTime + 0.1); 
+      osc2.frequency.setValueAtTime(UNLOCK_NOTE_2_HZ, ctx.currentTime + 0.1); 
       gain2.gain.setValueAtTime(0.08, ctx.currentTime + 0.1);
       gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
       osc2.connect(gain2);
@@ -344,7 +362,7 @@ function App() {
           autoGainControl: false, 
           noiseSuppression: false,
           latency: 0,
-          sampleRate: 48000,
+          sampleRate: MICROPHONE_SAMPLE_RATE,
           channelCount: 1
         } 
       });
@@ -415,7 +433,7 @@ function App() {
   };
 
   const setupSocketReceiver = () => {
-    audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: 'interactive' });
+    audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: LATENCY_HINT });
     nextPlayTimeRef.current = 0;
     
     analyserRef.current = audioContextRef.current.createAnalyser();
@@ -507,7 +525,7 @@ function App() {
 
   const startVisualizerLoop = () => {
     if (!analyserRef.current) return;
-    analyserRef.current.fftSize = 256;
+    analyserRef.current.fftSize = FFT_SIZE;
     const bufferLength = analyserRef.current.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
 
@@ -561,9 +579,9 @@ function App() {
       addLog('⏺️ Requesting screen share...');
       const screenStream = await navigator.mediaDevices.getDisplayMedia({
         video: { 
-          frameRate: { ideal: 60, max: 60 },
-          width: { ideal: 1920, max: 1920 },
-          height: { ideal: 1080, max: 1080 },
+          frameRate: { ideal: RECORDING_FRAME_RATE, max: RECORDING_FRAME_RATE },
+          width: { ideal: RECORDING_WIDTH, max: RECORDING_WIDTH },
+          height: { ideal: RECORDING_HEIGHT, max: RECORDING_HEIGHT },
           displaySurface: 'monitor' 
         },
         audio: true
@@ -601,7 +619,7 @@ function App() {
       try {
         screenRecorderRef.current = new MediaRecorder(combinedStream, { 
           mimeType, 
-          videoBitsPerSecond: 8000000 // Boosted to 8 Mbps for ultra-smooth 1080p 60fps
+          videoBitsPerSecond: RECORDING_BIT_RATE
         });
       } catch (e1) {
         addLog(`⚠️ Premium recorder failed (${e1.message}), trying standard WebM...`);
