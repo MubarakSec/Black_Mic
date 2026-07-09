@@ -1,7 +1,30 @@
+const PCM_NEGATIVE_SCALE = 0x8000;
+const PCM_POSITIVE_SCALE = 0x7FFF;
+const SAMPLE_MIN = -1;
+const SAMPLE_MAX = 1;
+const PCM_BYTES_PER_SAMPLE = 2;
+const NOISE_GATE_OPEN_RMS = 0.012;
+const NOISE_GATE_CLOSE_RMS = 0.006;
+const NOISE_GATE_ATTACK_RATE = 0.35;
+const NOISE_GATE_RELEASE_RATE = 0.08;
+
+function clampSample(sample) {
+  if (sample < SAMPLE_MIN) return SAMPLE_MIN;
+  if (sample > SAMPLE_MAX) return SAMPLE_MAX;
+  return sample;
+}
+
+function floatToInt16(sample) {
+  const clamped = clampSample(sample);
+  return clamped < 0 ? clamped * PCM_NEGATIVE_SCALE : clamped * PCM_POSITIVE_SCALE;
+}
+
 class AudioProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
     this.isStereo = options?.processorOptions?.isStereo ?? false;
+    this.gateOpen = false;
+    this.gateGain = 0;
     this.bufferPool = [];
 
     // Listen for returned buffers from the main thread to recycle them
@@ -21,7 +44,7 @@ class AudioProcessor extends AudioWorkletProcessor {
 
     const isStereoActive = this.isStereo && input.length >= 2;
     const totalSamples = isStereoActive ? channelLength * 2 : channelLength;
-    const requiredByteLength = totalSamples * 2;
+    const requiredByteLength = totalSamples * PCM_BYTES_PER_SAMPLE;
 
     // Retrieve or allocate an ArrayBuffer from the pool to avoid GC overhead
     let buffer = null;
@@ -36,14 +59,15 @@ class AudioProcessor extends AudioWorkletProcessor {
     }
 
     const int16Array = new Int16Array(buffer);
+    const rms = this.calculateRms(input, channelLength);
+    const targetGateGain = this.getTargetGateGain(rms);
 
     if (isStereoActive) {
       // Stereo: interleave channels L[0], R[0], L[1], R[1]...
       for (let i = 0; i < channelLength; i++) {
-        const left = Math.max(-1, Math.min(1, input[0][i]));
-        const right = Math.max(-1, Math.min(1, input[1][i]));
-        int16Array[i * 2] = left < 0 ? left * 0x8000 : left * 0x7FFF;
-        int16Array[i * 2 + 1] = right < 0 ? right * 0x8000 : right * 0x7FFF;
+        const gateGain = this.updateGateGain(targetGateGain);
+        int16Array[i * 2] = floatToInt16(input[0][i] * gateGain);
+        int16Array[i * 2 + 1] = floatToInt16(input[1][i] * gateGain);
       }
     } else {
       // Mono: downmix all available input channels (average L + R)
@@ -53,14 +77,48 @@ class AudioProcessor extends AudioWorkletProcessor {
         for (let ch = 0; ch < numChannels; ch++) {
           sum += input[ch][i];
         }
-        const avg = Math.max(-1, Math.min(1, sum / numChannels));
-        int16Array[i] = avg < 0 ? avg * 0x8000 : avg * 0x7FFF;
+        const gateGain = this.updateGateGain(targetGateGain);
+        int16Array[i] = floatToInt16((sum / numChannels) * gateGain);
       }
     }
 
     // Transfer the buffer back to the main thread (zero-copy)
     this.port.postMessage(buffer, [buffer]);
     return true;
+  }
+
+  calculateRms(input, channelLength) {
+    let sumSquares = 0;
+    const channelCount = input.length;
+
+    for (let i = 0; i < channelLength; i++) {
+      let frameSum = 0;
+      for (let ch = 0; ch < channelCount; ch++) {
+        frameSum += input[ch][i];
+      }
+      const sample = frameSum / channelCount;
+      sumSquares += sample * sample;
+    }
+
+    return Math.sqrt(sumSquares / channelLength);
+  }
+
+  getTargetGateGain(rms) {
+    if (rms >= NOISE_GATE_OPEN_RMS) {
+      this.gateOpen = true;
+      return 1;
+    }
+    if (rms <= NOISE_GATE_CLOSE_RMS) {
+      this.gateOpen = false;
+      return 0;
+    }
+    return this.gateOpen ? 1 : 0;
+  }
+
+  updateGateGain(targetGateGain) {
+    const rate = targetGateGain > this.gateGain ? NOISE_GATE_ATTACK_RATE : NOISE_GATE_RELEASE_RATE;
+    this.gateGain += (targetGateGain - this.gateGain) * rate;
+    return this.gateGain;
   }
 }
 
