@@ -1,6 +1,7 @@
 class AudioProcessor extends AudioWorkletProcessor {
-  constructor() {
+  constructor(options) {
     super();
+    this.isStereo = options?.processorOptions?.isStereo ?? false;
     this.reusableBuffer = null;
   }
 
@@ -8,12 +9,10 @@ class AudioProcessor extends AudioWorkletProcessor {
     const input = inputs[0];
     if (!input || input.length === 0) return true;
 
-    const numChannels = input.length;
+    const numChannels = this.isStereo ? Math.min(input.length, 2) : 1;
     const channelLength = input[0]?.length;
     if (!channelLength) return true;
 
-    // For stereo: interleave channels L[0], R[0], L[1], R[1], ...
-    // For mono: identical to previous behaviour
     const totalSamples = channelLength * numChannels;
 
     if (!this.reusableBuffer || this.reusableBuffer.length !== totalSamples) {

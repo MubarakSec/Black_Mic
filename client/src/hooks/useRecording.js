@@ -92,6 +92,13 @@ export function useRecording({ socketRef, roomIdRef, destRef, addLog }) {
     setIsAudioRecording(false);
   }, []);
 
+  const clearRecordings = useCallback(() => {
+    setRecordings(prev => {
+      prev.forEach(rec => URL.revokeObjectURL(rec.url));
+      return [];
+    });
+  }, []);
+
   // -------------------------------------------------------------------------
   // VAAPI recording: canvas frames -> server ffmpeg -> ~/Videos/*.mp4
   // -------------------------------------------------------------------------
@@ -175,5 +182,6 @@ export function useRecording({ socketRef, roomIdRef, destRef, addLog }) {
     isAudioRecording, isVaapiRecording, recordings,
     startAudioOnlyRecording, stopAudioOnlyRecording,
     startVaapiRecording, stopVaapiRecording,
+    clearRecordings,
   };
 }

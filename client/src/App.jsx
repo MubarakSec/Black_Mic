@@ -472,7 +472,10 @@ function App() {
       // Create AudioWorkletNode running our audio-processor processor
       const workletNode = new AudioWorkletNode(audioContextRef.current, 'audio-processor', {
         channelCount: channelMode === 'stereo' ? CHANNEL_STEREO : CHANNEL_MONO,
-        channelCountMode: 'explicit'
+        channelCountMode: 'explicit',
+        processorOptions: {
+          isStereo: channelMode === 'stereo'
+        }
       });
       processorRef.current = workletNode;
       
