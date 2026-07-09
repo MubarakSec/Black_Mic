@@ -27,17 +27,18 @@
 - No deprecated browser APIs (no `ScriptProcessorNode`, use `AudioWorklet`). Fix existing usage when touched; never introduce new.
 - Prefer `const` over `let`. Prefer functional patterns over imperative.
 
-## TypeScript
+## Language & Types
 
-- All new files must be `.ts` / `.tsx`.
-- Socket events must have typed payloads (define interfaces for every event shape).
-- All refs and audio buffers must have proper types.
-- `any` is forbidden unless absolutely unavoidable (document why with a `// eslint-disable-next-line` comment).
+- New files can be `.js` / `.jsx` (or `.ts` / `.tsx` if a TypeScript migration is initiated).
+- If using TypeScript:
+  - Socket events must have typed payloads (define interfaces for every event shape).
+  - All refs and audio buffers must have proper types.
+  - `any` is forbidden unless absolutely unavoidable (document why with a `// eslint-disable-next-line` comment).
 
 ## Security
 
 - Never trust socket data — validate shapes and ranges on receive.
-  - e.g. `sampleRate` must be 44100 or 48000; `roomId` must match `/^[A-Z0-9]{3,12}$/`
+  - e.g. `sampleRate` must be a valid number between 8000 and 96000; `roomId` must match `/^[A-Z0-9]{3,12}$/`
 - No open CORS in production — use allowlist.
 - No hardcoded secrets or ports — use env vars. Fix existing hardcoded values when touched.
 
@@ -53,3 +54,4 @@
 - Clean up all subscriptions, intervals, and streams in `useEffect` returns.
 - Use `useRef` for mutable values that shouldn't trigger re-renders.
 - Use `React.memo` on pure presentational components.
+- Run heavy real-time audio conversion/processing inside a dedicated `AudioWorklet` thread (not the main UI thread) to prevent interface stutters.
