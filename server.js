@@ -1,14 +1,31 @@
 const express = require('express');
 const http = require('http');
+const https = require('https');
 const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
+const fs = require('fs');
 
 const app = express();
 app.use(cors());
 app.use(express.static(path.join(__dirname, 'client/dist')));
 
-const server = http.createServer(app);
+// Check for local SSL keys to run in HTTPS mode (required for secure browser media contexts)
+let server;
+const keyPath = path.join(__dirname, 'server.key');
+const certPath = path.join(__dirname, 'server.cert');
+const useHttps = fs.existsSync(keyPath) && fs.existsSync(certPath);
+
+if (useHttps) {
+  const options = {
+    key: fs.readFileSync(keyPath),
+    cert: fs.readFileSync(certPath)
+  };
+  server = https.createServer(options, app);
+} else {
+  server = http.createServer(app);
+}
+
 const io = new Server(server, {
   cors: {
     origin: "*",
@@ -53,7 +70,7 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = 3001;
+const PORT = process.env.PORT || 3001;
 server.listen(PORT, () => {
-  console.log(`Signaling server running on port ${PORT}`);
+  console.log(`Signaling server running on ${useHttps ? 'HTTPS' : 'HTTP'} protocol on port ${PORT}`);
 });

@@ -21,3 +21,7 @@ yarn-error.log*
 # OS files
 .DS_Store
 Thumbs.db
+
+# SSL Certificates for local HTTPS
+server.key
+server.cert
