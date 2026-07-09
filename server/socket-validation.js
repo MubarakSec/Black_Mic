@@ -11,10 +11,6 @@ const MAX_GAIN = 2;
 const MONO_CHANNELS = 1;
 const STEREO_CHANNELS = 2;
 const PCM_BYTES_PER_SAMPLE = 2;
-const MIN_CAPTURE_DIMENSION = 2;
-const MAX_CAPTURE_DIMENSION = 7680;
-const JPEG_START_BYTE = 0xFF;
-const JPEG_SOI_BYTE = 0xD8;
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -47,46 +43,30 @@ function isValidChannelCount(channelCount) {
 }
 
 function normalizePcmChunk(chunk) {
-  if (!isPlainObject(chunk)) return null;
-  if (!isValidSampleRate(chunk.sampleRate)) return null;
-  if (!isValidChannelCount(chunk.channelCount)) return null;
-
-  const buffer = toBuffer(chunk.buffer);
+  // If the client sent raw binary Buffer/ArrayBuffer
+  const buffer = toBuffer(chunk);
   if (!buffer) return null;
-  if (buffer.byteLength === 0) return null;
+  if (buffer.byteLength <= 5) return null;
   if (buffer.byteLength > config.maxSocketPayloadBytes) return null;
 
-  const frameSize = PCM_BYTES_PER_SAMPLE * chunk.channelCount;
-  if (buffer.byteLength % frameSize !== 0) return null;
+  // Extract header: [uint32: sampleRate][uint8: channelCount]
+  const sampleRate = buffer.readUint32LE(0);
+  const channelCount = buffer.readUint8(4);
+
+  if (!isValidSampleRate(sampleRate)) return null;
+  if (!isValidChannelCount(channelCount)) return null;
+
+  // Extract PCM payload (from byte 5 onwards)
+  const pcmBuffer = buffer.subarray(5);
+
+  const frameSize = PCM_BYTES_PER_SAMPLE * channelCount;
+  if (pcmBuffer.byteLength % frameSize !== 0) return null;
 
   return {
-    buffer,
-    sampleRate: chunk.sampleRate,
-    channelCount: chunk.channelCount,
+    buffer: pcmBuffer,
+    sampleRate,
+    channelCount,
   };
-}
-
-function isValidCaptureDimension(value) {
-  if (!Number.isInteger(value)) return false;
-  if (value < MIN_CAPTURE_DIMENSION) return false;
-  if (value > MAX_CAPTURE_DIMENSION) return false;
-  return value % 2 === 0;
-}
-
-function isValidRecordingOptions(opts) {
-  if (!isPlainObject(opts)) return false;
-  if (!isValidCaptureDimension(opts.width)) return false;
-  return isValidCaptureDimension(opts.height);
-}
-
-function normalizeVideoFrame(frameBuffer) {
-  const buffer = toBuffer(frameBuffer);
-  if (!buffer) return null;
-  if (buffer.byteLength === 0) return null;
-  if (buffer.byteLength > config.maxSocketPayloadBytes) return null;
-  if (buffer[0] !== JPEG_START_BYTE) return null;
-  if (buffer[1] !== JPEG_SOI_BYTE) return null;
-  return buffer;
 }
 
 function isValidRemoteCommand(cmd) {
@@ -109,10 +89,8 @@ function isValidTimestamp(timestamp) {
 
 module.exports = {
   isValidRemoteCommand,
-  isValidRecordingOptions,
   isValidRole,
   isValidRoomId,
   isValidTimestamp,
   normalizePcmChunk,
-  normalizeVideoFrame,
 };

@@ -26,7 +26,7 @@ export default function RoomSelector({ roomId, setRoomId, onStartSender, onStart
             <Mic size={36} color="var(--accent-1)" />
           </div>
           <h2>Phone (Microphone)</h2>
-          <p>Stream compressed voice</p>
+          <p>Stream lossless mic audio</p>
         </button>
         
         <button className="role-card" onClick={onStartReceiver} aria-label="Use this device as the PC audio receiver">
@@ -34,7 +34,7 @@ export default function RoomSelector({ roomId, setRoomId, onStartSender, onStart
             <Volume2 size={36} color="var(--accent-2)" />
           </div>
           <h2>PC (Receiver)</h2>
-          <p>Receive and play audio</p>
+          <p>Bridge audio into OBS</p>
         </button>
       </div>
     </div>

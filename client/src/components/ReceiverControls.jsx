@@ -1,6 +1,12 @@
 import React from 'react';
-import { Mic, Square, Video } from 'lucide-react';
+import { Mic, Square } from 'lucide-react';
 import RemoteControlPanel from './RemoteControlPanel';
+
+function formatTime(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`;
+}
 
 export default function ReceiverControls({
   outputVolume,
@@ -10,14 +16,12 @@ export default function ReceiverControls({
   remoteAckMsg,
   isMonitoring,
   isAudioRecording,
-  isVaapiRecording,
+  recordingSeconds,
   onRemoteGainChange,
   onToggleRemoteMute,
   onToggleMonitoring,
   onStartAudioRecording,
   onStopAudioRecording,
-  onStartVaapiRecording,
-  onStopVaapiRecording,
 }) {
   return (
     <>
@@ -59,17 +63,16 @@ export default function ReceiverControls({
             <Square size={16} /> Stop Audio Recording
           </button>
         )}
-
-        {!isVaapiRecording ? (
-          <button className="btn-control is-danger-soft" onClick={onStartVaapiRecording}>
-            <Video size={16} /> Record Screen (VAAPI)
-          </button>
-        ) : (
-          <button className="btn-control is-warning-active" onClick={onStopVaapiRecording}>
-            <Square size={16} /> Stop VAAPI Recording
-          </button>
-        )}
       </div>
+
+      {isAudioRecording && (
+        <div className="recording-status-bar" style={{ marginTop: '1.25rem', display: 'flex', justifyContent: 'center', alignItems: 'center', gap: '1.25rem', fontSize: '0.85rem', fontFamily: 'JetBrains Mono', color: 'var(--danger-color)', fontWeight: '600' }}>
+          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '0.4rem' }}>
+            <span className="rec-dot"></span>
+            REC {formatTime(recordingSeconds)}
+          </span>
+        </div>
+      )}
     </>
   );
 }

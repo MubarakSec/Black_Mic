@@ -40,6 +40,13 @@ if [ -f "$PID_FILE" ]; then
   rm -f "$PID_FILE"
 fi
 
+# ---- Clean up old virtual sinks if any ---------------------
+echo "[BMS] Cleaning up old virtual audio sinks..."
+pactl list short modules 2>/dev/null | grep "BMS_" | awk '{print $1}' | while read -r mod_id; do
+  pactl unload-module "$mod_id" 2>/dev/null || true
+done
+
+
 # ---- Build client if dist is missing ----------------------
 if [ ! -d "$APP_DIR/client/dist" ] || [ "$APP_DIR/client/src/App.jsx" -nt "$APP_DIR/client/dist/index.html" ]; then
   echo "[BMS] Building client..."

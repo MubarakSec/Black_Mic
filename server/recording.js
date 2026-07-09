@@ -1,16 +1,11 @@
 'use strict';
 
 const { spawn } = require('child_process');
-const path = require('path');
-const fs = require('fs');
-const config = require('./config');
 
-// Ensure ~/Videos exists
-if (!fs.existsSync(config.videosDir)) fs.mkdirSync(config.videosDir, { recursive: true });
 
 /**
  * Per-room session state.
- * @type {Record<string, {sinkName, moduleId, audioBridge, recorder, sampleRate, channelCount}>}
+ * @type {Record<string, {sinkName, moduleId, audioBridge, sampleRate, channelCount}>}
  */
 const sessions = {};
 
@@ -44,7 +39,15 @@ async function initRoom(roomId) {
     return { ok: false, message };
   }
 
-  sessions[roomId] = { sinkName, moduleId, audioBridge: null, recorder: null, sampleRate: 48000, channelCount: 1 };
+  sessions[roomId] = { 
+    sinkName, 
+    moduleId, 
+    audioBridge: null, 
+    sampleRate: 48000, 
+    channelCount: 1,
+    pcmBufferQueue: [],
+    pcmBufferBytes: 0
+  };
   console.log(`[BMS] Virtual sink ready: ${sinkName} (module ${moduleId})`);
   return { ok: true };
 }
@@ -57,9 +60,9 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
   const s = sessions[roomId];
   if (!s) return;
 
-  // Restart bridge if format changes mid-stream
-  if (s.audioBridge && (s.sampleRate !== sampleRate || s.channelCount !== channelCount)) {
-    console.log(`[BMS] Format changed from ${s.sampleRate}Hz ${s.channelCount}ch to ${sampleRate}Hz ${channelCount}ch. Restarting bridge...`);
+  // Restart bridge if sample rate changes mid-stream
+  if (s.audioBridge && s.sampleRate !== sampleRate) {
+    console.log(`[BMS] Format changed from ${s.sampleRate}Hz to ${sampleRate}Hz. Restarting bridge...`);
     if (s.audioBridge.stdin.writable) s.audioBridge.stdin.end();
     s.audioBridge = null;
   }
@@ -67,88 +70,62 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
   if (!s.audioBridge) {
     s.sampleRate = sampleRate;
     s.channelCount = channelCount;
-    const env = { ...process.env, LIBVA_DRIVER_NAME: config.libvaDriver };
-    const audioBridge = spawn('ffmpeg', [
-      '-hide_banner', '-loglevel', 'error',
-      '-f', 's16le', '-ar', String(sampleRate), '-ac', String(channelCount), '-i', 'pipe:0',
-      '-f', 'pulse', s.sinkName,
-    ], { env });
+    // Always output stereo to the virtual sink to fill both L and R
+    const audioBridge = spawn('pacat', [
+      '--playback',
+      `--device=${s.sinkName}`,
+      '--format=s16le',
+      `--rate=${sampleRate}`,
+      '--channels=2',
+      '--latency-msec=30'
+    ], { stdio: ['pipe', 'ignore', 'ignore'] });
     s.audioBridge = audioBridge;
     audioBridge.on('error', e => console.error('[BMS] Audio bridge error:', e.message));
     audioBridge.on('close', () => {
       if (s.audioBridge !== audioBridge) return;
       s.audioBridge = null;
     });
-    console.log(`[BMS] Audio bridge: ${sampleRate}Hz ${channelCount}ch -> ${s.sinkName}`);
+    console.log(`[BMS] pacat audio bridge: ${sampleRate}Hz stereo -> ${s.sinkName}`);
   }
 
-  if (s.audioBridge.stdin.writable) s.audioBridge.stdin.write(Buffer.from(pcmBuffer));
+  // Fast TypedArray upmix: duplicate mono sample to both channels
+  let stereoBuffer;
+  if (channelCount === 1) {
+    const mono = new Int16Array(
+      pcmBuffer.buffer,
+      pcmBuffer.byteOffset,
+      pcmBuffer.byteLength / 2
+    );
+    const stereo = new Int16Array(mono.length * 2);
+    for (let i = 0; i < mono.length; i++) {
+      const sample = mono[i];
+      stereo[i * 2] = sample;
+      stereo[i * 2 + 1] = sample;
+    }
+    stereoBuffer = Buffer.from(stereo.buffer, stereo.byteOffset, stereo.byteLength);
+  } else {
+    stereoBuffer = Buffer.from(pcmBuffer);
+  }
+
+  // Aggregate chunks into ~30ms blocks to prevent pipe starvation pops
+  s.pcmBufferQueue.push(stereoBuffer);
+  s.pcmBufferBytes += stereoBuffer.length;
+
+  // 5760 bytes = 30ms of stereo 48kHz s16le (48000 * 2 * 2 * 0.03)
+  const FLUSH_THRESHOLD = 5760;
+  if (s.pcmBufferBytes >= FLUSH_THRESHOLD) {
+    const chunk = Buffer.concat(s.pcmBufferQueue);
+    if (s.audioBridge.stdin.writable) {
+      s.audioBridge.stdin.write(chunk);
+    }
+    s.pcmBufferQueue = [];
+    s.pcmBufferBytes = 0;
+  }
 }
 
 // ---------------------------------------------------------------------------
-// VAAPI screen recorder: JPEG frame pipe + PulseAudio audio
+// Cleanup
 // ---------------------------------------------------------------------------
-
-function startRecording(roomId, io) {
-  const s = sessions[roomId];
-  if (!s) return { ok: false, message: 'Recording cannot start until the PC receiver room is initialized.' };
-  if (s.recorder) {
-    const message = `Recording already active for room ${roomId}.`;
-    console.warn(`[BMS] ${message}`);
-    return { ok: false, message };
-  }
-
-  const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const outputFile = path.join(config.videosDir, `BMS-${ts}.mp4`);
-  const monitorSource = `${s.sinkName}.monitor`;
-  const env = { ...process.env, LIBVA_DRIVER_NAME: config.libvaDriver };
-
-  const recorder = spawn('ffmpeg', [
-    '-hide_banner', '-loglevel', 'error', '-y',
-    '-vaapi_device', config.vaapiDevice,
-    // Video: JPEG frames from browser canvas via stdin pipe
-    '-f', 'image2pipe', '-vcodec', 'mjpeg', '-r', String(config.recordFps), '-i', 'pipe:0',
-    // Audio: virtual PipeWire sink monitor (phone mic)
-    '-f', 'pulse', '-ac', String(s.channelCount), '-ar', String(s.sampleRate), '-i', monitorSource,
-    // VAAPI H.264 encode
-    '-vf', 'format=nv12,hwupload',
-    '-c:v', 'h264_vaapi', '-rc_mode', 'VBR', '-b:v', config.videoBitrate,
-    '-c:a', 'aac', '-b:a', config.audioBitrate,
-    '-vsync', 'cfr', '-async', '1',
-    outputFile,
-  ], { env });
-  s.recorder = recorder;
-
-  recorder.stderr.on('data', d => process.stdout.write(`[ffmpeg] ${d}`));
-  recorder.on('error', e => console.error('[BMS] Recorder error:', e.message));
-  recorder.on('close', code => {
-    const success = code === 0 || code === null;
-    const sizeMB = success && fs.existsSync(outputFile)
-      ? (fs.statSync(outputFile).size / (1024 * 1024)).toFixed(2)
-      : '0';
-    io.to(roomId).emit('record-complete', { success, file: path.basename(outputFile), sizeMB });
-    if (s.recorder === recorder) s.recorder = null;
-    console.log(`[BMS] Recording done: ${outputFile} (${sizeMB} MB, code ${code})`);
-  });
-
-  console.log(`[BMS] VAAPI recording -> ${outputFile}`);
-  return { ok: true, outputFile };
-}
-
-function feedVideoFrame(roomId, frameBuffer) {
-  const s = sessions[roomId];
-  if (s?.recorder?.stdin.writable) s.recorder.stdin.write(Buffer.from(frameBuffer));
-}
-
-function stopRecording(roomId) {
-  const s = sessions[roomId];
-  if (!s?.recorder) return;
-  if (s.recorder.stdin.writable) {
-    s.recorder.stdin.end();
-    return;
-  }
-  s.recorder.kill('SIGTERM');
-}
 
 function stopProcess(childProcess) {
   if (!childProcess) return;
@@ -159,15 +136,9 @@ function stopProcess(childProcess) {
   childProcess.kill('SIGTERM');
 }
 
-// ---------------------------------------------------------------------------
-// Cleanup
-// ---------------------------------------------------------------------------
-
 function cleanupRoom(roomId) {
   const s = sessions[roomId];
   if (!s) return;
-
-  stopRecording(roomId);
 
   stopProcess(s.audioBridge);
 
@@ -179,4 +150,4 @@ function cleanupRoom(roomId) {
   delete sessions[roomId];
 }
 
-module.exports = { initRoom, feedAudio, startRecording, feedVideoFrame, stopRecording, cleanupRoom };
+module.exports = { initRoom, feedAudio, cleanupRoom };

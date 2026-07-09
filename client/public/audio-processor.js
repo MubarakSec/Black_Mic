@@ -2,7 +2,14 @@ class AudioProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
     this.isStereo = options?.processorOptions?.isStereo ?? false;
-    this.reusableBuffer = null;
+    this.bufferPool = [];
+
+    // Listen for returned buffers from the main thread to recycle them
+    this.port.onmessage = (e) => {
+      if (e.data instanceof ArrayBuffer) {
+        this.bufferPool.push(e.data);
+      }
+    };
   }
 
   process(inputs, _outputs, _parameters) {
@@ -12,13 +19,26 @@ class AudioProcessor extends AudioWorkletProcessor {
     const channelLength = input[0]?.length;
     if (!channelLength) return true;
 
-    if (this.isStereo && input.length >= 2) {
-      // Stereo: interleave channels L[0], R[0], L[1], R[1]...
-      const totalSamples = channelLength * 2;
-      if (!this.reusableBuffer || this.reusableBuffer.length !== totalSamples) {
-        this.reusableBuffer = new Int16Array(totalSamples);
+    const isStereoActive = this.isStereo && input.length >= 2;
+    const totalSamples = isStereoActive ? channelLength * 2 : channelLength;
+    const requiredByteLength = totalSamples * 2;
+
+    // Retrieve or allocate an ArrayBuffer from the pool to avoid GC overhead
+    let buffer = null;
+    for (let i = 0; i < this.bufferPool.length; i++) {
+      if (this.bufferPool[i].byteLength === requiredByteLength) {
+        buffer = this.bufferPool.splice(i, 1)[0];
+        break;
       }
-      const int16Array = this.reusableBuffer;
+    }
+    if (!buffer) {
+      buffer = new ArrayBuffer(requiredByteLength);
+    }
+
+    const int16Array = new Int16Array(buffer);
+
+    if (isStereoActive) {
+      // Stereo: interleave channels L[0], R[0], L[1], R[1]...
       for (let i = 0; i < channelLength; i++) {
         const left = Math.max(-1, Math.min(1, input[0][i]));
         const right = Math.max(-1, Math.min(1, input[1][i]));
@@ -27,11 +47,6 @@ class AudioProcessor extends AudioWorkletProcessor {
       }
     } else {
       // Mono: downmix all available input channels (average L + R)
-      const totalSamples = channelLength;
-      if (!this.reusableBuffer || this.reusableBuffer.length !== totalSamples) {
-        this.reusableBuffer = new Int16Array(totalSamples);
-      }
-      const int16Array = this.reusableBuffer;
       const numChannels = input.length;
       for (let i = 0; i < channelLength; i++) {
         let sum = 0;
@@ -43,8 +58,8 @@ class AudioProcessor extends AudioWorkletProcessor {
       }
     }
 
-    // Transfer the buffer back to the main thread
-    this.port.postMessage(this.reusableBuffer.buffer.slice(0));
+    // Transfer the buffer back to the main thread (zero-copy)
+    this.port.postMessage(buffer, [buffer]);
     return true;
   }
 }

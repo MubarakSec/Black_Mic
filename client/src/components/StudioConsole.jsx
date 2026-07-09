@@ -18,9 +18,12 @@ export default function StudioConsole({
   isPhoneMuted,
   latency,
   bitrate,
-  packetLoss,
-  volume,
+  underruns,
   canvasRef,
+  orbRef,
+  iconRef,
+  vuBarRef,
+  vuLabelRef,
   inputGain,
   setInputGain,
   channelMode,
@@ -31,7 +34,7 @@ export default function StudioConsole({
   remoteAckMsg,
   isMonitoring,
   isAudioRecording,
-  isVaapiRecording,
+  recordingSeconds,
   recordings,
   logs,
   onRemoteGainChange,
@@ -39,8 +42,6 @@ export default function StudioConsole({
   onToggleMonitoring,
   onStartAudioRecording,
   onStopAudioRecording,
-  onStartVaapiRecording,
-  onStopVaapiRecording,
   onDisconnect,
 }) {
   const isSender = role === 'sender';
@@ -50,8 +51,15 @@ export default function StudioConsole({
     <div className="console-panel text-center">
       <ConsoleHeader role={role} roomId={roomId} />
       <StatusPanel status={status} role={role} isPhoneMuted={isPhoneMuted} roomState={roomState} operatorIssue={operatorIssue} />
-      <TelemetryStrip latency={latency} bitrate={bitrate} packetLoss={packetLoss} />
-      <VisualizerPanel role={role} volume={volume} canvasRef={canvasRef} />
+      <TelemetryStrip latency={latency} bitrate={bitrate} underruns={underruns} />
+      <VisualizerPanel 
+        role={role} 
+        canvasRef={canvasRef} 
+        orbRef={orbRef}
+        iconRef={iconRef}
+        vuBarRef={vuBarRef}
+        vuLabelRef={vuLabelRef}
+      />
 
       {isSender && (
         <SenderControls
@@ -71,14 +79,12 @@ export default function StudioConsole({
           remoteAckMsg={remoteAckMsg}
           isMonitoring={isMonitoring}
           isAudioRecording={isAudioRecording}
-          isVaapiRecording={isVaapiRecording}
+          recordingSeconds={recordingSeconds}
           onRemoteGainChange={onRemoteGainChange}
           onToggleRemoteMute={onToggleRemoteMute}
           onToggleMonitoring={onToggleMonitoring}
           onStartAudioRecording={onStartAudioRecording}
           onStopAudioRecording={onStopAudioRecording}
-          onStartVaapiRecording={onStartVaapiRecording}
-          onStopVaapiRecording={onStopVaapiRecording}
         />
       )}
 

@@ -22,7 +22,7 @@ export default function RemoteControlPanel({
       <input
         type="range"
         min="0"
-        max="2"
+        max="10"
         step="0.05"
         value={remotePhoneGain}
         onChange={onGainChange}

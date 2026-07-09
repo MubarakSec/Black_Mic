@@ -11,12 +11,10 @@ const config = require('./server/config');
 const recording = require('./server/recording');
 const {
   isValidRemoteCommand,
-  isValidRecordingOptions,
   isValidRole,
   isValidRoomId,
   isValidTimestamp,
   normalizePcmChunk,
-  normalizeVideoFrame,
 } = require('./server/socket-validation');
 
 const app = express();
@@ -35,6 +33,7 @@ const server = useHttps
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
   maxHttpBufferSize: config.maxSocketPayloadBytes,
+  transports: ['websocket'],
 });
 
 // Track which socket is in which room (for cleanup on disconnect)
@@ -126,35 +125,10 @@ io.on('connection', (socket) => {
     const pcmChunk = normalizePcmChunk(chunk);
     if (!pcmChunk) return;
 
-    // Relay to receiver in room
-    socket.to(roomId).emit('pcm-chunk', pcmChunk);
+    // Relay the raw binary chunk directly to the receiver
+    socket.to(roomId).emit('pcm-chunk', chunk);
     // Feed audio to PipeWire virtual sink (phone mic -> system mic)
     recording.feedAudio(roomId, pcmChunk.buffer, pcmChunk.sampleRate, pcmChunk.channelCount);
-  });
-
-  // VAAPI recording control events (from PC receiver)
-  socket.on('start-vaapi-record', (opts, roomId) => {
-    if (!isValidRoomId(roomId)) return;
-    if (!isSocketInRoom(socket, roomId)) return;
-    if (getSocketRoom(socket)?.role !== 'receiver') return;
-    if (!isValidRecordingOptions(opts)) return;
-    const result = recording.startRecording(roomId, io);
-    if (!result.ok) warnSocket(socket, result.message);
-  });
-
-  socket.on('video-frame', (frameBuffer, roomId) => {
-    if (!isValidRoomId(roomId)) return;
-    if (!isSocketInRoom(socket, roomId)) return;
-    const videoFrame = normalizeVideoFrame(frameBuffer);
-    if (!videoFrame) return;
-    recording.feedVideoFrame(roomId, videoFrame);
-  });
-
-  socket.on('stop-vaapi-record', (roomId) => {
-    if (!isValidRoomId(roomId)) return;
-    if (!isSocketInRoom(socket, roomId)) return;
-    if (getSocketRoom(socket)?.role !== 'receiver') return;
-    recording.stopRecording(roomId);
   });
 
   // Remote control relay (PC -> phone)

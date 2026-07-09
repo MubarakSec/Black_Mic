@@ -1,27 +1,35 @@
 import React from 'react';
 import { Mic, Volume2 } from 'lucide-react';
 
-export default function VisualizerPanel({ role, volume, canvasRef }) {
+export default function VisualizerPanel({ role, canvasRef, orbRef, iconRef, vuBarRef, vuLabelRef }) {
   const isSender = role === 'sender';
   
   return (
     <div className="visualizer-section">
       <div className="visualizer-container">
         <div 
+          ref={orbRef}
           className="glow-orb" 
           style={{ 
-            transform: `scale(${1 + (volume / 255) * 1.3})`,
-            opacity: 0.3 + (volume / 255) * 0.5,
+            transform: 'scale(1)',
+            opacity: 0.3,
             background: isSender 
               ? 'radial-gradient(circle, var(--accent-1) 0%, transparent 70%)' 
               : 'radial-gradient(circle, var(--accent-2) 0%, transparent 70%)'
           }}
         />
-        <div className="icon-center">
+        <div 
+          ref={iconRef}
+          className="icon-center"
+          style={{ 
+            color: '#fff',
+            transition: 'color 0.1s ease'
+          }}
+        >
           {isSender ? (
-            <Mic size={40} color={volume > 30 ? 'var(--accent-1)' : '#fff'} style={{ transition: 'color 0.1s ease' }} />
+            <Mic size={40} color="currentColor" />
           ) : (
-            <Volume2 size={40} color={volume > 30 ? 'var(--accent-2)' : '#fff'} style={{ transition: 'color 0.1s ease' }} />
+            <Volume2 size={40} color="currentColor" />
           )}
         </div>
       </div>
@@ -37,7 +45,7 @@ export default function VisualizerPanel({ role, volume, canvasRef }) {
           display: 'block', 
           margin: '0.5rem 0 1rem 0', 
           borderRadius: '4px',
-          opacity: volume > 5 ? 1 : 0.2,
+          opacity: 0.2,
           transition: 'opacity 0.3s ease'
         }} 
       />
@@ -46,13 +54,14 @@ export default function VisualizerPanel({ role, volume, canvasRef }) {
       <div className="vu-meter">
         <div className="vu-meter-label">
           <span>VU LEVEL</span>
-          <span>{Math.round((volume / 255) * 100)}%</span>
+          <span ref={vuLabelRef}>0%</span>
         </div>
         <div className="vu-meter-track">
           <div 
+            ref={vuBarRef}
             className="vu-meter-bar" 
             style={{ 
-              width: `${(volume / 255) * 100}%`,
+              width: '0%',
               background: isSender ? 'var(--accent-1)' : 'var(--accent-2)',
               boxShadow: isSender ? '0 0 8px var(--accent-1)' : '0 0 8px var(--accent-2)'
             }}

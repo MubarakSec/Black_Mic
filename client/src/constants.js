@@ -21,6 +21,7 @@ export const SILENCE_THRESHOLD_MS = 2500;
 // Audio Hardware Constraints
 export const MICROPHONE_SAMPLE_RATE = 48000;
 export const LATENCY_HINT = 'interactive';
+export const RECEIVER_TARGET_BUFFER_MS = 60;
 
 // Alarm and Unlock Sound Parameters
 export const ALARM_INTERVAL_MS = 1200;
@@ -33,9 +34,3 @@ export const UNLOCK_NOTE_2_HZ = 659.25; // E5 Note
 // Visualizer Configuration
 export const FFT_SIZE = 256;
 export const GLOW_VOLUME_THRESHOLD = 30;
-
-// Screen Share & Media Recording Constants
-export const RECORDING_FRAME_RATE = 60;
-export const RECORDING_WIDTH = 1920;
-export const RECORDING_HEIGHT = 1080;
-export const RECORDING_BIT_RATE = 8000000; // 8 Mbps

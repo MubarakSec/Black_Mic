@@ -1,7 +1,7 @@
 const MIN_SAMPLE_RATE = 8000;
 const MAX_SAMPLE_RATE = 96000;
 const MIN_GAIN = 0;
-const MAX_GAIN = 2;
+const MAX_GAIN = 10;
 const MONO_CHANNELS = 1;
 const STEREO_CHANNELS = 2;
 const PCM_BYTES_PER_SAMPLE = 2;
@@ -33,21 +33,34 @@ export function isValidRoomId(roomId) {
 }
 
 export function normalizePcmPayload(data) {
-  if (!isPlainObject(data)) return null;
-  if (!isValidSampleRate(data.sampleRate)) return null;
-  if (!isValidChannelCount(data.channelCount)) return null;
+  // If we receive the optimized binary packet (ArrayBuffer or ArrayBuffer view)
+  const isBinary = data instanceof ArrayBuffer || ArrayBuffer.isView(data);
+  if (!isBinary) return null;
 
-  const buffer = toArrayBuffer(data.buffer);
-  if (!buffer) return null;
-  if (buffer.byteLength === 0) return null;
+  const rawBuffer = data instanceof ArrayBuffer ? data : data.buffer;
+  const byteOffset = data instanceof ArrayBuffer ? 0 : data.byteOffset;
+  const byteLength = data instanceof ArrayBuffer ? data.byteLength : data.byteLength;
 
-  const frameSize = PCM_BYTES_PER_SAMPLE * data.channelCount;
-  if (buffer.byteLength % frameSize !== 0) return null;
+  if (byteLength <= 5) return null;
+
+  // Read header: [uint32: sampleRate][uint8: channelCount]
+  const view = new DataView(rawBuffer, byteOffset, 5);
+  const sampleRate = view.getUint32(0, true); // little endian
+  const channelCount = view.getUint8(4);
+
+  if (!isValidSampleRate(sampleRate)) return null;
+  if (!isValidChannelCount(channelCount)) return null;
+
+  // Extract raw PCM payload (from byte 5 onwards)
+  const pcmBuffer = rawBuffer.slice(byteOffset + 5, byteOffset + byteLength);
+
+  const frameSize = PCM_BYTES_PER_SAMPLE * channelCount;
+  if (pcmBuffer.byteLength % frameSize !== 0) return null;
 
   return {
-    buffer,
-    sampleRate: data.sampleRate,
-    channelCount: data.channelCount,
+    buffer: pcmBuffer,
+    sampleRate,
+    channelCount,
   };
 }
 

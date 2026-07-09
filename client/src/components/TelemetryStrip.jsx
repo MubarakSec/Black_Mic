@@ -1,6 +1,6 @@
 import React from 'react';
 
-export default function TelemetryStrip({ latency, bitrate, packetLoss }) {
+export default function TelemetryStrip({ latency, bitrate, underruns }) {
   return (
     <div className="telemetry-strip">
       <div className="telemetry-stat">
@@ -12,8 +12,8 @@ export default function TelemetryStrip({ latency, bitrate, packetLoss }) {
         <span className="telemetry-stat-value">{bitrate !== null ? `${bitrate} kbps` : '--'}</span>
       </div>
       <div className="telemetry-stat">
-        <span className="telemetry-stat-label">LOSS RATE</span>
-        <span className="telemetry-stat-value">{packetLoss}%</span>
+        <span className="telemetry-stat-label">UNDERRUNS</span>
+        <span className="telemetry-stat-value">{underruns}</span>
       </div>
     </div>
   );
