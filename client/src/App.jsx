@@ -1,7 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
-import { Mic, Volume2, Activity, CheckCircle2, Video, Square, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Volume2, CheckCircle2, Activity, Video, Square, RefreshCw, AlertTriangle } from 'lucide-react';
 import fixWebmDuration from 'fix-webm-duration';
+import RoomSelector from './components/RoomSelector';
+import TelemetryStrip from './components/TelemetryStrip';
+import VisualizerPanel from './components/VisualizerPanel';
+import LoggerPanel from './components/LoggerPanel';
+import RecordingLibrary from './components/RecordingLibrary';
 import './index.css';
 
 function App() {
@@ -717,41 +722,12 @@ function App() {
   if (!role) {
     return (
       <div className="container">
-        <div className="console-panel text-center">
-          <h1 className="title">Black Mic Studio</h1>
-          <p className="subtitle">Select device console role</p>
-          
-          <div className="room-input-container">
-            <label className="room-input-label">Studio Room ID</label>
-            <input 
-              type="text" 
-              value={roomId} 
-              maxLength={12}
-              onChange={(e) => setRoomId(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
-              className="room-input"
-              aria-label="Studio Room Identification Code"
-            />
-            <span className="room-input-hint">Use the same ID on both devices to pair.</span>
-          </div>
-          
-          <div className="card-grid">
-            <button className="role-card" onClick={startSender} aria-label="Use this device as the phone microphone">
-              <div className="icon-wrapper">
-                <Mic size={36} color="var(--accent-1)" />
-              </div>
-              <h2>Phone (Microphone)</h2>
-              <p>Stream compressed voice</p>
-            </button>
-            
-            <button className="role-card" onClick={startReceiver} aria-label="Use this device as the PC audio receiver">
-              <div className="icon-wrapper">
-                <Volume2 size={36} color="var(--accent-2)" />
-              </div>
-              <h2>PC (Receiver)</h2>
-              <p>Receive and play audio</p>
-            </button>
-          </div>
-        </div>
+        <RoomSelector 
+          roomId={roomId} 
+          setRoomId={setRoomId} 
+          onStartSender={startSender} 
+          onStartReceiver={startReceiver} 
+        />
       </div>
     );
   }
@@ -812,74 +788,10 @@ function App() {
         </div>
 
         {/* Real-time Connection Telemetry Strip */}
-        <div className="telemetry-strip">
-          <div className="telemetry-stat">
-            <span className="telemetry-stat-label">LATENCY</span>
-            <span className="telemetry-stat-value">{latency !== null ? `${latency} ms` : '--'}</span>
-          </div>
-          <div className="telemetry-stat">
-            <span className="telemetry-stat-label">BITRATE</span>
-            <span className="telemetry-stat-value">{bitrate !== null ? `${bitrate} kbps` : '--'}</span>
-          </div>
-          <div className="telemetry-stat">
-            <span className="telemetry-stat-label">LOSS RATE</span>
-            <span className="telemetry-stat-value">{packetLoss}%</span>
-          </div>
-        </div>
+        <TelemetryStrip latency={latency} bitrate={bitrate} packetLoss={packetLoss} />
 
-        <div className="visualizer-section">
-          <div className="visualizer-container">
-            <div 
-              className="glow-orb" 
-              style={{ 
-                transform: `scale(${1 + (volume / 255) * 1.3})`,
-                opacity: 0.3 + (volume / 255) * 0.5,
-                background: role === 'sender' ? 'radial-gradient(circle, var(--accent-1) 0%, transparent 70%)' : 'radial-gradient(circle, var(--accent-2) 0%, transparent 70%)'
-              }}
-            />
-            <div className="icon-center">
-              {role === 'sender' ? (
-                <Mic size={40} color={volume > 30 ? 'var(--accent-1)' : '#fff'} style={{ transition: 'color 0.1s ease' }} />
-              ) : (
-                <Volume2 size={40} color={volume > 30 ? 'var(--accent-2)' : '#fff'} style={{ transition: 'color 0.1s ease' }} />
-              )}
-            </div>
-          </div>
-
-          {/* Canvas Spectrum visualizer */}
-          <canvas 
-            ref={canvasRef} 
-            width={520} 
-            height={120} 
-            style={{ 
-              width: '100%', 
-              height: '60px', 
-              display: 'block', 
-              margin: '0.5rem 0 1rem 0', 
-              borderRadius: '4px',
-              opacity: volume > 5 ? 1 : 0.2,
-              transition: 'opacity 0.3s ease'
-            }} 
-          />
-
-          {/* dynamic VU Meter bar */}
-          <div className="vu-meter">
-            <div className="vu-meter-label">
-              <span>VU LEVEL</span>
-              <span>{Math.round((volume / 255) * 100)}%</span>
-            </div>
-            <div className="vu-meter-track">
-              <div 
-                className="vu-meter-bar" 
-                style={{ 
-                  width: `${(volume / 255) * 100}%`,
-                  background: role === 'sender' ? 'var(--accent-1)' : 'var(--accent-2)',
-                  boxShadow: role === 'sender' ? '0 0 8px var(--accent-1)' : '0 0 8px var(--accent-2)'
-                }}
-              />
-            </div>
-          </div>
-        </div>
+        {/* Visualizer Panel (VU Meter & Spectrum Canvas) */}
+        <VisualizerPanel role={role} volume={volume} canvasRef={canvasRef} />
 
         {/* Volume / Gain controls */}
         {role === 'sender' && (
@@ -919,13 +831,7 @@ function App() {
         )}
 
         {/* System Telemetry Log panel */}
-        <div className="telemetry-panel">
-          <div className="telemetry-header">SYSTEM TELEMETRY LOG</div>
-          <div className="telemetry-content">
-            {logs.length === 0 && <div className="telemetry-empty">No telemetry events logged yet.</div>}
-            {logs.map((log, i) => <div className="telemetry-line" key={i}>{log}</div>)}
-          </div>
-        </div>
+        <LoggerPanel logs={logs} />
 
         {role === 'receiver' && (
           <div className="control-row">
@@ -963,36 +869,7 @@ function App() {
 
         {/* Recording Library Section */}
         {role === 'receiver' && recordings.length > 0 && (
-          <div className="telemetry-panel mt-8" style={{ background: 'rgba(0, 0, 0, 0.4)' }}>
-            <div className="telemetry-header">🎥 RECORDING LIBRARY (TAKES LIST)</div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', marginTop: '0.5rem' }}>
-              {recordings.map((rec, index) => {
-                const ext = rec.mimeType.includes('mp4') ? 'mp4' : 'webm';
-                return (
-                  <div key={rec.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--panel-border)', padding: '0.75rem 1rem', borderRadius: '6px' }}>
-                    <div style={{ textAlign: 'left' }}>
-                      <div style={{ fontWeight: 600, fontSize: '0.9rem', color: '#fff' }}>
-                        Take #{recordings.length - index} ({rec.timestamp})
-                      </div>
-                      <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)', fontFamily: 'JetBrains Mono', marginTop: '0.15rem' }}>
-                        Duration: {rec.duration} | Size: {rec.size} | Format: {ext.toUpperCase()}
-                      </div>
-                    </div>
-                    <div>
-                      <a 
-                        href={rec.url} 
-                        download={`${rec.filename}.${ext}`}
-                        className="btn-control"
-                        style={{ padding: '0.4rem 0.85rem', fontSize: '0.8rem', background: 'rgba(0, 210, 255, 0.1)', color: 'var(--accent-2)', borderColor: 'var(--accent-2)' }}
-                      >
-                        Download
-                      </a>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
+          <RecordingLibrary recordings={recordings} />
         )}
 
         <button className="btn-danger mt-8" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', margin: '2rem auto 0 auto' }} onClick={handleDisconnect}>
