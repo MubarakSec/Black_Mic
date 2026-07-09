@@ -3,10 +3,12 @@ const PCM_POSITIVE_SCALE = 0x7FFF;
 const SAMPLE_MIN = -1;
 const SAMPLE_MAX = 1;
 const PCM_BYTES_PER_SAMPLE = 2;
-const NOISE_GATE_OPEN_RMS = 0.012;
-const NOISE_GATE_CLOSE_RMS = 0.006;
-const NOISE_GATE_ATTACK_RATE = 0.35;
-const NOISE_GATE_RELEASE_RATE = 0.08;
+const MS_PER_SECOND = 1000;
+const NOISE_GATE_OPEN_RMS = 0.008;
+const NOISE_GATE_CLOSE_RMS = 0.003;
+const NOISE_GATE_HOLD_MS = 180;
+const NOISE_GATE_ATTACK_RATE = 0.08;
+const NOISE_GATE_RELEASE_RATE = 0.0012;
 
 function clampSample(sample) {
   if (sample < SAMPLE_MIN) return SAMPLE_MIN;
@@ -25,6 +27,8 @@ class AudioProcessor extends AudioWorkletProcessor {
     this.isStereo = options?.processorOptions?.isStereo ?? false;
     this.gateOpen = false;
     this.gateGain = 0;
+    this.gateHoldFrames = Math.round((sampleRate * NOISE_GATE_HOLD_MS) / MS_PER_SECOND);
+    this.gateHoldRemainingFrames = 0;
     this.bufferPool = [];
 
     // Listen for returned buffers from the main thread to recycle them
@@ -60,7 +64,7 @@ class AudioProcessor extends AudioWorkletProcessor {
 
     const int16Array = new Int16Array(buffer);
     const rms = this.calculateRms(input, channelLength);
-    const targetGateGain = this.getTargetGateGain(rms);
+    const targetGateGain = this.getTargetGateGain(rms, channelLength);
 
     if (isStereoActive) {
       // Stereo: interleave channels L[0], R[0], L[1], R[1]...
@@ -103,16 +107,22 @@ class AudioProcessor extends AudioWorkletProcessor {
     return Math.sqrt(sumSquares / channelLength);
   }
 
-  getTargetGateGain(rms) {
+  getTargetGateGain(rms, channelLength) {
     if (rms >= NOISE_GATE_OPEN_RMS) {
       this.gateOpen = true;
+      this.gateHoldRemainingFrames = this.gateHoldFrames;
       return 1;
     }
+    if (rms > NOISE_GATE_CLOSE_RMS) return this.gateOpen ? 1 : 0;
+
+    this.gateHoldRemainingFrames = Math.max(0, this.gateHoldRemainingFrames - channelLength);
+    if (this.gateHoldRemainingFrames > 0) return this.gateOpen ? 1 : 0;
+
     if (rms <= NOISE_GATE_CLOSE_RMS) {
       this.gateOpen = false;
       return 0;
     }
-    return this.gateOpen ? 1 : 0;
+    return 0;
   }
 
   updateGateGain(targetGateGain) {
