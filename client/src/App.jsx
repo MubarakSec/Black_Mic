@@ -1,12 +1,12 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
-import { Volume2, CheckCircle2, Activity, Video, Square, RefreshCw, AlertTriangle, Mic } from 'lucide-react';
-import fixWebmDuration from 'fix-webm-duration';
+import { Volume2, CheckCircle2, Activity, Square, RefreshCw, AlertTriangle, Mic, Video } from 'lucide-react';
 import RoomSelector from './components/RoomSelector';
 import TelemetryStrip from './components/TelemetryStrip';
 import VisualizerPanel from './components/VisualizerPanel';
 import LoggerPanel from './components/LoggerPanel';
 import RecordingLibrary from './components/RecordingLibrary';
+import { useRecording } from './hooks/useRecording';
 import {
   DEFAULT_ROOM_ID,
   LS_ROOM_ID,
@@ -26,10 +26,6 @@ import {
   UNLOCK_NOTE_1_HZ,
   UNLOCK_NOTE_2_HZ,
   FFT_SIZE,
-  RECORDING_FRAME_RATE,
-  RECORDING_WIDTH,
-  RECORDING_HEIGHT,
-  RECORDING_BIT_RATE
 } from './constants';
 import './index.css';
 
@@ -39,8 +35,6 @@ function App() {
   const [status, setStatus] = useState('Waiting to connect...');
   const [volume, setVolume] = useState(0);
   const [logs, setLogs] = useState([]);
-  const [isRecording, setIsRecording] = useState(false);
-  const [isAudioRecording, setIsAudioRecording] = useState(false);
   const [isMonitoring, setIsMonitoring] = useState(false);
 
   // Volume state — persisted
@@ -53,19 +47,16 @@ function App() {
   // Remote control states
   const [remotePhoneGain, setRemotePhoneGain] = useState(1.0);
   const [isPhoneMuted, setIsPhoneMuted] = useState(false);
-  const [remoteAckMsg, setRemoteAckMsg] = useState(null); // PC-side confirmation badge
+  const [remoteAckMsg, setRemoteAckMsg] = useState(null);
 
   // Connection Telemetry state
   const [latency, setLatency] = useState(null);
   const [bitrate, setBitrate] = useState(null);
-  const [packetLoss] = useState(0); // 0% on TCP socket level
+  const [packetLoss] = useState(0);
 
   // Audio Lock & Disconnect Alarm states
   const [isAudioLocked, setIsAudioLocked] = useState(false);
   const [isSignalLost, setIsSignalLost] = useState(false);
-
-  // Recording Library state
-  const [recordings, setRecordings] = useState([]);
 
   const socketRef = useRef(null);
   const localStreamRef = useRef(null);
@@ -75,45 +66,42 @@ function App() {
   const animationRef = useRef(null);
   const roleRef = useRef(null);
   const canvasRef = useRef(null);
-  
+
   // Dynamic nodes
   const senderGainNodeRef = useRef(null);
   const receiverGainNodeRef = useRef(null);
-  
-  // Audio Queue refs
-  const nextPlayTimeRef = useRef(0);
 
-  // Screen recording refs
+  // Audio Queue refs
+  const nextPlayTimeRef = useRef(null);
+
+  // Audio destination (needed by useRecording for audio-only capture)
   const destRef = useRef(null);
-  const screenRecorderRef = useRef(null);
-  const chunksRef = useRef([]);
-  const startTimeRef = useRef(0);
-  const mixedContextRef = useRef(null);
-  const screenStreamRef = useRef(null);
 
   // Telemetry counting refs
   const bytesCountRef = useRef(0);
-
-
-  // Audio-only recording refs
-  const audioRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
 
   // Connection loss watchdog refs
   const lastChunkTimeRef = useRef(0);
   const hasConnectedOnceRef = useRef(false);
 
-  // Keep roomId accessible inside socket callbacks without dependency issues
+  // Keep roomId accessible inside callbacks without stale closure
   const roomIdRef = useRef(roomId);
   useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
 
-  // Screen Wake Lock ref (keeps phone screen awake while streaming)
+  // Screen Wake Lock ref
   const wakeLockRef = useRef(null);
 
   const addLog = (msg) => {
     console.log(msg);
     setLogs(prev => [...prev.slice(-6), msg]);
   };
+
+  // Recording logic extracted into hook (keeps App.jsx under 800 lines)
+  const {
+    isAudioRecording, isVaapiRecording, recordings,
+    startAudioOnlyRecording, stopAudioOnlyRecording,
+    startVaapiRecording, stopVaapiRecording,
+  } = useRecording({ socketRef, roomIdRef, destRef, addLog });
 
   useEffect(() => {
     roleRef.current = role;
@@ -442,7 +430,7 @@ function App() {
 
   const startSender = async () => {
     setRole('sender');
-    socketRef.current.emit('join-room', roomId);
+    socketRef.current.emit('join-room', roomId, 'sender');
     setStatus('Requesting microphone access...');
     addLog(`🎙️ Requesting Mic access... (Room: ${roomId})`);
 
@@ -500,10 +488,11 @@ function App() {
         // Track byte telemetry
         bytesCountRef.current += processedBuffer.byteLength;
         
-        // Stream compressed audio chunk over Socket.io TCP
+        // Stream PCM chunk over Socket.io — include channelCount so server configures audio bridge correctly
         socketRef.current.emit('pcm-chunk', {
           buffer: processedBuffer,
-          sampleRate: audioContextRef.current.sampleRate
+          sampleRate: audioContextRef.current.sampleRate,
+          channelCount: channelMode === 'stereo' ? CHANNEL_STEREO : CHANNEL_MONO,
         }, roomId);
       };
       
@@ -519,11 +508,10 @@ function App() {
 
   const startReceiver = () => {
     setRole('receiver');
-    socketRef.current.emit('join-room', roomId);
+    socketRef.current.emit('join-room', roomId, 'receiver');
     setStatus('Waiting for audio stream...');
     addLog(`🎧 Receiver initialized. Waiting for stream in Room: ${roomId}`);
     socketRef.current.emit('receiver-ready', roomId);
-
     setupSocketReceiver();
   };
 
@@ -669,185 +657,9 @@ function App() {
     updateVisualizer();
   };
 
-  const startAudioOnlyRecording = () => {
-    if (!destRef.current) return;
-    const audioStream = destRef.current.stream;
-    if (!audioStream || audioStream.getAudioTracks().length === 0) {
-      addLog('❌ No audio stream available to record.');
-      return;
-    }
-    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-      ? 'audio/webm;codecs=opus'
-      : 'audio/webm';
-    audioChunksRef.current = [];
-    audioRecorderRef.current = new MediaRecorder(audioStream, { mimeType });
-    audioRecorderRef.current.ondataavailable = (e) => {
-      if (e.data.size > 0) audioChunksRef.current.push(e.data);
-    };
-    audioRecorderRef.current.onstop = () => {
-      const blob = new Blob(audioChunksRef.current, { type: mimeType });
-      const url = URL.createObjectURL(blob);
-      const timestamp = new Date().toLocaleTimeString();
-      const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
-      setRecordings(prev => [{ id: Date.now(), url, timestamp, duration: 'Audio only', size: `${sizeMB} MB`, mimeType, filename: `bms-audio-${Date.now()}` }, ...prev]);
-      addLog(`💾 Audio-only take saved! Size: ${sizeMB} MB`);
-      // Auto-download
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = `bms-audio-${Date.now()}.webm`;
-      a.click();
-    };
-    audioRecorderRef.current.start(1000);
-    setIsAudioRecording(true);
-    addLog('🎙️ Audio-only recording ACTIVE!');
-  };
+  // Old browser MediaRecorder recording removed.
+  // Recording is now handled by useRecording hook (VAAPI via server, audio-only via MediaRecorder).
 
-  const stopAudioOnlyRecording = () => {
-    if (audioRecorderRef.current && audioRecorderRef.current.state !== 'inactive') {
-      audioRecorderRef.current.stop();
-    }
-    setIsAudioRecording(false);
-  };
-
-  const startScreenRecording = async () => {
-    try {
-      addLog('⏺️ Requesting screen share...');
-      const screenStream = await navigator.mediaDevices.getDisplayMedia({
-        video: { 
-          frameRate: { ideal: RECORDING_FRAME_RATE, max: RECORDING_FRAME_RATE },
-          width: { ideal: RECORDING_WIDTH, max: RECORDING_WIDTH },
-          height: { ideal: RECORDING_HEIGHT, max: RECORDING_HEIGHT },
-          displaySurface: 'monitor' 
-        },
-        audio: true
-      });
-      screenStreamRef.current = screenStream;
-      
-      const micAudioTracks = destRef.current?.stream.getAudioTracks() || [];
-      const screenAudioTracks = screenStream.getAudioTracks() || [];
-      
-      const mixedContext = new (window.AudioContext || window.webkitAudioContext)();
-      const mixedDest = mixedContext.createMediaStreamDestination();
-      
-      if (micAudioTracks.length > 0) {
-        mixedContext.createMediaStreamSource(new MediaStream(micAudioTracks)).connect(mixedDest);
-      }
-      if (screenAudioTracks.length > 0) {
-        mixedContext.createMediaStreamSource(new MediaStream(screenAudioTracks)).connect(mixedDest);
-      }
-
-      const combinedStream = new MediaStream([
-        ...screenStream.getVideoTracks(),
-        ...mixedDest.stream.getAudioTracks()
-      ]);
-      
-      mixedContextRef.current = mixedContext;
-
-      const mimeType = MediaRecorder.isTypeSupported('video/webm;codecs=vp9,opus')
-        ? 'video/webm;codecs=vp9,opus'
-        : MediaRecorder.isTypeSupported('video/webm;codecs=h264,opus') 
-          ? 'video/webm;codecs=h264,opus' 
-          : MediaRecorder.isTypeSupported('video/webm;codecs=vp8,opus')
-            ? 'video/webm;codecs=vp8,opus'
-            : 'video/webm';
-
-      try {
-        screenRecorderRef.current = new MediaRecorder(combinedStream, { 
-          mimeType, 
-          videoBitsPerSecond: RECORDING_BIT_RATE
-        });
-      } catch (e1) {
-        addLog(`⚠️ Premium recorder failed (${e1.message}), trying standard WebM...`);
-        try {
-          screenRecorderRef.current = new MediaRecorder(combinedStream, { mimeType: 'video/webm' });
-        } catch (e2) {
-          addLog(`⚠️ WebM recorder failed (${e2.message}), trying default browser recorder...`);
-          screenRecorderRef.current = new MediaRecorder(combinedStream);
-        }
-      }
-      
-      screenRecorderRef.current.ondataavailable = e => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-      
-      screenRecorderRef.current.onstop = () => {
-        addLog('💾 Processing and saving recording...');
-        const duration = Date.now() - startTimeRef.current;
-        const recordedMime = screenRecorderRef.current.mimeType || 'video/webm';
-        const blob = new Blob(chunksRef.current, { type: recordedMime });
-        chunksRef.current = [];
-        
-        const processRecording = (finalBlob) => {
-          const url = URL.createObjectURL(finalBlob);
-          const sizeMB = (finalBlob.size / (1024 * 1024)).toFixed(2) + ' MB';
-          const durationSec = Math.round(duration / 1000);
-          const durationFormatted = `${Math.floor(durationSec / 60)}m ${durationSec % 60}s`;
-          const timeStr = new Date().toLocaleTimeString();
-
-          const newRecording = {
-            id: Date.now(),
-            url,
-            mimeType: recordedMime,
-            filename: `BlackMic_Take_${new Date().toISOString().replace(/:/g, '-')}`,
-            size: sizeMB,
-            duration: durationFormatted,
-            timestamp: timeStr
-          };
-
-          // Store in recordings library state
-          setRecordings(prev => [newRecording, ...prev]);
-
-          // Attempt automatic download (convenience trigger)
-          try {
-            const a = document.createElement('a');
-            a.href = url;
-            const ext = recordedMime.includes('mp4') ? 'mp4' : 'webm';
-            a.download = `${newRecording.filename}.${ext}`;
-            a.click();
-            addLog('✅ Video auto-download started!');
-          } catch (downloadErr) {
-            addLog(`⚠️ Auto-download blocked (${downloadErr.message}). Use Library below.`);
-          }
-
-          setIsRecording(false);
-          
-          if (mixedContextRef.current) {
-            mixedContextRef.current.close().catch(() => {});
-            mixedContextRef.current = null;
-          }
-        };
-
-        if (recordedMime.includes('webm')) {
-          fixWebmDuration(blob, duration, (fixedBlob) => {
-            processRecording(fixedBlob);
-          });
-        } else {
-          processRecording(blob);
-        }
-      };
-
-      screenStream.getVideoTracks()[0].onended = () => {
-        stopScreenRecording();
-      };
-
-      startTimeRef.current = Date.now();
-      screenRecorderRef.current.start(1000);
-      setIsRecording(true);
-      addLog('⏺️ Recording ACTIVE!');
-    } catch (e) {
-      addLog(`❌ Recording Error: ${e.message}`);
-    }
-  };
-
-  const stopScreenRecording = () => {
-    if (screenRecorderRef.current && screenRecorderRef.current.state !== 'inactive') {
-      screenRecorderRef.current.stop();
-    }
-    if (screenStreamRef.current) {
-      screenStreamRef.current.getTracks().forEach(track => track.stop());
-      screenStreamRef.current = null;
-    }
-  };
 
   const toggleMonitoring = () => {
     if (!audioContextRef.current || !analyserRef.current) return;
@@ -1068,52 +880,53 @@ function App() {
 
         {role === 'receiver' && (
           <div className="control-row">
-            <button 
-              className="btn-control" 
-              style={{ 
-                background: isMonitoring ? 'rgba(0, 210, 255, 0.1)' : 'rgba(255, 255, 255, 0.02)', 
-                color: isMonitoring ? 'var(--accent-2)' : '#fff', 
-                borderColor: isMonitoring ? 'var(--accent-2)' : 'var(--panel-border)' 
-              }} 
+            <button
+              className="btn-control"
+              style={{
+                background: isMonitoring ? 'rgba(0, 210, 255, 0.1)' : 'rgba(255, 255, 255, 0.02)',
+                color: isMonitoring ? 'var(--accent-2)' : '#fff',
+                borderColor: isMonitoring ? 'var(--accent-2)' : 'var(--panel-border)'
+              }}
               onClick={toggleMonitoring}
             >
               {isMonitoring ? '🔊 Feedback Active' : '🔇 Enable Live Feedback'}
             </button>
 
-            {/* Audio-only recording button */}
+            {/* Audio-only recording */}
             {!isAudioRecording ? (
-              <button 
-                className="btn-control" 
-                style={{ background: 'rgba(0, 245, 140, 0.06)', color: 'var(--accent-1)', borderColor: 'rgba(0, 245, 140, 0.2)', display: 'flex', alignItems: 'center', gap: '0.5rem' }} 
+              <button
+                className="btn-control"
+                style={{ background: 'rgba(0, 245, 140, 0.06)', color: 'var(--accent-1)', borderColor: 'rgba(0, 245, 140, 0.2)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                 onClick={startAudioOnlyRecording}
               >
                 <Mic size={16} /> Record Audio Only
               </button>
             ) : (
-              <button 
-                className="btn-control" 
-                style={{ background: 'rgba(255, 204, 0, 0.08)', color: '#ffcc00', borderColor: 'rgba(255, 204, 0, 0.2)', display: 'flex', alignItems: 'center', gap: '0.5rem' }} 
+              <button
+                className="btn-control"
+                style={{ background: 'rgba(255, 204, 0, 0.08)', color: '#ffcc00', borderColor: 'rgba(255, 204, 0, 0.2)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
                 onClick={stopAudioOnlyRecording}
               >
                 <Square size={16} /> Stop Audio Recording
               </button>
             )}
 
-            {!isRecording ? (
-              <button 
-                className="btn-control" 
-                style={{ background: 'rgba(255, 59, 48, 0.08)', color: '#ff3b30', borderColor: 'rgba(255, 59, 48, 0.2)', display: 'flex', alignItems: 'center', gap: '0.5rem' }} 
-                onClick={startScreenRecording}
+            {/* VAAPI hardware-encoded screen recording */}
+            {!isVaapiRecording ? (
+              <button
+                className="btn-control"
+                style={{ background: 'rgba(255, 59, 48, 0.08)', color: '#ff3b30', borderColor: 'rgba(255, 59, 48, 0.2)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                onClick={startVaapiRecording}
               >
-                <Video size={16} /> Record Screen + Mic
+                <Video size={16} /> Record Screen (VAAPI)
               </button>
             ) : (
-              <button 
-                className="btn-control" 
-                style={{ background: 'rgba(255, 204, 0, 0.08)', color: '#ffcc00', borderColor: 'rgba(255, 204, 0, 0.2)', display: 'flex', alignItems: 'center', gap: '0.5rem' }} 
-                onClick={stopScreenRecording}
+              <button
+                className="btn-control"
+                style={{ background: 'rgba(255, 204, 0, 0.08)', color: '#ffcc00', borderColor: 'rgba(255, 204, 0, 0.2)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
+                onClick={stopVaapiRecording}
               >
-                <Square size={16} /> Stop Screen Recording
+                <Square size={16} /> Stop VAAPI Recording
               </button>
             )}
           </div>

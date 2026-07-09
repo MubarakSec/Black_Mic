@@ -5,32 +5,31 @@ class AudioProcessor extends AudioWorkletProcessor {
   }
 
   process(inputs, _outputs, _parameters) {
-    // inputs[0] represents the first audio source (microphone stream)
     const input = inputs[0];
     if (!input || input.length === 0) return true;
-    
-    // channelData represents mono channel 0
-    const channelData = input[0];
-    if (!channelData || channelData.length === 0) return true;
 
-    const length = channelData.length;
-    
-    // Pre-allocate buffer in the worklet thread to prevent garbage collection churn
-    if (!this.reusableBuffer || this.reusableBuffer.length !== length) {
-      this.reusableBuffer = new Int16Array(length);
+    const numChannels = input.length;
+    const channelLength = input[0]?.length;
+    if (!channelLength) return true;
+
+    // For stereo: interleave channels L[0], R[0], L[1], R[1], ...
+    // For mono: identical to previous behaviour
+    const totalSamples = channelLength * numChannels;
+
+    if (!this.reusableBuffer || this.reusableBuffer.length !== totalSamples) {
+      this.reusableBuffer = new Int16Array(totalSamples);
     }
-    
+
     const int16Array = this.reusableBuffer;
-    for (let i = 0; i < length; i++) {
-      // Clamp values between [-1.0, 1.0]
-      const s = Math.max(-1, Math.min(1, channelData[i]));
-      // Map to 16-bit signed integer range
-      int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    for (let i = 0; i < channelLength; i++) {
+      for (let ch = 0; ch < numChannels; ch++) {
+        const s = Math.max(-1, Math.min(1, input[ch][i]));
+        int16Array[i * numChannels + ch] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      }
     }
-    
-    // Send the raw binary array buffer back to the main thread
+
+    // Transfer the buffer back to the main thread
     this.port.postMessage(int16Array.buffer.slice(0));
-    
     return true;
   }
 }
