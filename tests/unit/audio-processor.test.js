@@ -3,12 +3,11 @@ import fs from 'node:fs';
 import vm from 'node:vm';
 
 const WORKLET_URL = new URL('../../client/public/audio-processor.js', import.meta.url);
-const TEST_SAMPLE_RATE = 48000;
 const QUANTUM_FRAMES = 128;
 const IDLE_NOISE_SAMPLE = 0.002;
 const VOICE_SAMPLE = 0.1;
 const PCM_VOICE_FLOOR = 1000;
-const PCM_QUIET_TAIL_FLOOR = 10;
+const PCM_IDLE_NOISE_FLOOR = 10;
 
 function loadProcessorClass() {
   let ProcessorClass = null;
@@ -27,7 +26,6 @@ function loadProcessorClass() {
     ArrayBuffer,
     Int16Array,
     Math,
-    sampleRate: TEST_SAMPLE_RATE,
     registerProcessor: (_name, processorClass) => {
       ProcessorClass = processorClass;
     },
@@ -51,11 +49,11 @@ function processMonoSample(processor, sample) {
   return new Int16Array(buffer);
 }
 
-describe('AudioProcessor noise gate', () => {
-  it('mutes low-level idle noise', () => {
+describe('AudioProcessor PCM encoding', () => {
+  it('preserves low-level input without chopping it', () => {
     const pcm = processMonoSample(createProcessor(), IDLE_NOISE_SAMPLE);
 
-    expect(Math.max(...pcm.map(Math.abs))).toBe(0);
+    expect(Math.max(...pcm.map(Math.abs))).toBeGreaterThan(PCM_IDLE_NOISE_FLOOR);
   });
 
   it('passes voice-level input', () => {
@@ -64,12 +62,12 @@ describe('AudioProcessor noise gate', () => {
     expect(Math.max(...pcm.map(Math.abs))).toBeGreaterThan(PCM_VOICE_FLOOR);
   });
 
-  it('keeps a quiet tail open after voice starts', () => {
+  it('keeps low-level input after voice without gate re-entry chopping', () => {
     const processor = createProcessor();
 
     processMonoSample(processor, VOICE_SAMPLE);
     const pcm = processMonoSample(processor, IDLE_NOISE_SAMPLE);
 
-    expect(Math.max(...pcm.map(Math.abs))).toBeGreaterThan(PCM_QUIET_TAIL_FLOOR);
+    expect(Math.max(...pcm.map(Math.abs))).toBeGreaterThan(PCM_IDLE_NOISE_FLOOR);
   });
 });
