@@ -470,7 +470,10 @@ function App() {
       analyserRef.current = audioContextRef.current.createAnalyser();
       
       // Create AudioWorkletNode running our audio-processor processor
-      const workletNode = new AudioWorkletNode(audioContextRef.current, 'audio-processor');
+      const workletNode = new AudioWorkletNode(audioContextRef.current, 'audio-processor', {
+        channelCount: channelMode === 'stereo' ? CHANNEL_STEREO : CHANNEL_MONO,
+        channelCountMode: 'explicit'
+      });
       processorRef.current = workletNode;
       
       // Connect chain: Mic source -> Gain Node -> Visualizer Analyser -> AudioWorkletNode
@@ -505,6 +508,15 @@ function App() {
       setStatus('Microphone access denied or unavailable.');
     }
   };
+
+  useEffect(() => {
+    if (role === 'sender' && localStreamRef.current) {
+      addLog(`🔄 Channel mode changed to ${channelMode.toUpperCase()}. Restarting mic stream...`);
+      cleanupAudio();
+      startSender();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [channelMode]);
 
   const startReceiver = () => {
     setRole('receiver');
@@ -575,9 +587,22 @@ function App() {
         floatData[i] = intData[i] / 32768.0;
       }
       
-      // Reconstruct buffer at the native captured sample rate
-      const audioBuffer = audioContextRef.current.createBuffer(1, floatData.length, sampleRate);
-      audioBuffer.copyToChannel(floatData, 0);
+      const channels = data.channelCount || 1;
+      const samplesPerChannel = floatData.length / channels;
+      const audioBuffer = audioContextRef.current.createBuffer(channels, samplesPerChannel, sampleRate);
+      
+      if (channels === 2) {
+        const leftData = new Float32Array(samplesPerChannel);
+        const rightData = new Float32Array(samplesPerChannel);
+        for (let i = 0; i < samplesPerChannel; i++) {
+          leftData[i] = floatData[i * 2];
+          rightData[i] = floatData[i * 2 + 1];
+        }
+        audioBuffer.copyToChannel(leftData, 0);
+        audioBuffer.copyToChannel(rightData, 1);
+      } else {
+        audioBuffer.copyToChannel(floatData, 0);
+      }
       
       const source = audioContextRef.current.createBufferSource();
       source.buffer = audioBuffer;

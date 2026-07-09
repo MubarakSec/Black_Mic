@@ -63,16 +63,28 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
   const s = sessions[roomId];
   if (!s) return;
 
+  // Restart bridge if format changes mid-stream
+  if (s.audioBridge && (s.sampleRate !== sampleRate || s.channelCount !== channelCount)) {
+    console.log(`[BMS] Format changed from ${s.sampleRate}Hz ${s.channelCount}ch to ${sampleRate}Hz ${channelCount}ch. Restarting bridge...`);
+    if (s.audioBridge.stdin.writable) s.audioBridge.stdin.end();
+    s.audioBridge = null;
+  }
+
   if (!s.audioBridge) {
     s.sampleRate = sampleRate;
     s.channelCount = channelCount;
     const env = { ...process.env, LIBVA_DRIVER_NAME: LIBVA_DRIVER };
-    s.audioBridge = spawn('ffmpeg', [
+    const audioBridge = spawn('ffmpeg', [
       '-hide_banner', '-loglevel', 'error',
       '-f', 's16le', '-ar', String(sampleRate), '-ac', String(channelCount), '-i', 'pipe:0',
       '-f', 'pulse', s.sinkName,
     ], { env });
-    s.audioBridge.on('error', e => console.error('[BMS] Audio bridge error:', e.message));
+    s.audioBridge = audioBridge;
+    audioBridge.on('error', e => console.error('[BMS] Audio bridge error:', e.message));
+    audioBridge.on('close', () => {
+      if (s.audioBridge !== audioBridge) return;
+      s.audioBridge = null;
+    });
     console.log(`[BMS] Audio bridge: ${sampleRate}Hz ${channelCount}ch -> ${s.sinkName}`);
   }
 
@@ -86,13 +98,17 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
 function startRecording(roomId, io) {
   const s = sessions[roomId];
   if (!s) return null;
+  if (s.recorder) {
+    console.warn(`[BMS] Recording already active for room ${roomId}`);
+    return null;
+  }
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const outputFile = path.join(VIDEOS_DIR, `BMS-${ts}.mp4`);
   const monitorSource = `${s.sinkName}.monitor`;
   const env = { ...process.env, LIBVA_DRIVER_NAME: LIBVA_DRIVER };
 
-  s.recorder = spawn('ffmpeg', [
+  const recorder = spawn('ffmpeg', [
     '-hide_banner', '-loglevel', 'error', '-y',
     '-vaapi_device', VAAPI_DEVICE,
     // Video: JPEG frames from browser canvas via stdin pipe
@@ -106,15 +122,17 @@ function startRecording(roomId, io) {
     '-vsync', 'cfr', '-async', '1',
     outputFile,
   ], { env });
+  s.recorder = recorder;
 
-  s.recorder.stderr.on('data', d => process.stdout.write(`[ffmpeg] ${d}`));
-  s.recorder.on('close', code => {
+  recorder.stderr.on('data', d => process.stdout.write(`[ffmpeg] ${d}`));
+  recorder.on('error', e => console.error('[BMS] Recorder error:', e.message));
+  recorder.on('close', code => {
     const success = code === 0 || code === null;
     const sizeMB = success && fs.existsSync(outputFile)
       ? (fs.statSync(outputFile).size / (1024 * 1024)).toFixed(2)
       : '0';
     io.to(roomId).emit('record-complete', { success, file: path.basename(outputFile), sizeMB });
-    s.recorder = null;
+    if (s.recorder === recorder) s.recorder = null;
     console.log(`[BMS] Recording done: ${outputFile} (${sizeMB} MB, code ${code})`);
   });
 
@@ -129,7 +147,21 @@ function feedVideoFrame(roomId, frameBuffer) {
 
 function stopRecording(roomId) {
   const s = sessions[roomId];
-  if (s?.recorder?.stdin.writable) s.recorder.stdin.end();
+  if (!s?.recorder) return;
+  if (s.recorder.stdin.writable) {
+    s.recorder.stdin.end();
+    return;
+  }
+  s.recorder.kill('SIGTERM');
+}
+
+function stopProcess(childProcess) {
+  if (!childProcess) return;
+  if (childProcess.stdin?.writable) {
+    childProcess.stdin.end();
+    return;
+  }
+  childProcess.kill('SIGTERM');
 }
 
 // ---------------------------------------------------------------------------
@@ -142,7 +174,7 @@ function cleanupRoom(roomId) {
 
   stopRecording(roomId);
 
-  if (s.audioBridge?.stdin.writable) s.audioBridge.stdin.end();
+  stopProcess(s.audioBridge);
 
   if (s.moduleId) {
     spawn('pactl', ['unload-module', s.moduleId]).on('error', () => {});
