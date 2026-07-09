@@ -56,8 +56,6 @@ function App() {
   // Telemetry counting refs
   const bytesCountRef = useRef(0);
 
-  // Reusable array buffer for phone microphone (prevents garbage collection leaks)
-  const reusableBufferRef = useRef(null);
 
   // Connection loss watchdog refs
   const lastChunkTimeRef = useRef(0);
@@ -324,21 +322,6 @@ function App() {
     hasConnectedOnceRef.current = false;
   };
 
-  // Reusable array buffer converter to prevent garbage collection leaks
-  const convertFloat32ToInt16 = (buffer) => {
-    // Pre-allocate array wrapper once to prevent gc churn
-    if (!reusableBufferRef.current || reusableBufferRef.current.length !== buffer.length) {
-      reusableBufferRef.current = new Int16Array(buffer.length);
-    }
-    const int16Array = reusableBufferRef.current;
-    for (let i = 0; i < buffer.length; i++) {
-      const s = Math.max(-1, Math.min(1, buffer[i]));
-      int16Array[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
-    }
-    // Slicing provides a clean, raw binary copy with zero JS-wrapper overhead
-    return int16Array.buffer.slice(0);
-  };
-
   const startSender = async () => {
     setRole('sender');
     socketRef.current.emit('join-room', roomId);
@@ -366,6 +349,11 @@ function App() {
       
       // Enforce 44.1kHz or 48kHz depending on device default
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
+      
+      addLog('📡 Loading audio worklet module...');
+      await audioContextRef.current.audioWorklet.addModule('/audio-processor.js');
+      addLog('✅ Audio worklet module loaded!');
+
       const source = audioContextRef.current.createMediaStreamSource(stream);
       
       // Gain node for slider control
@@ -375,21 +363,21 @@ function App() {
       // Visualizer connection
       analyserRef.current = audioContextRef.current.createAnalyser();
       
-      // Connect chain: Mic source -> Gain Node -> Visualizer Analyser -> ScriptProcessor
+      // Create AudioWorkletNode running our audio-processor processor
+      const workletNode = new AudioWorkletNode(audioContextRef.current, 'audio-processor');
+      processorRef.current = workletNode;
+      
+      // Connect chain: Mic source -> Gain Node -> Visualizer Analyser -> AudioWorkletNode
       source.connect(senderGainNodeRef.current);
       senderGainNodeRef.current.connect(analyserRef.current);
+      senderGainNodeRef.current.connect(workletNode);
       
-      // Ultra-low latency buffer size (2048 samples = ~46ms)
-      processorRef.current = audioContextRef.current.createScriptProcessor(2048, 1, 1);
-      senderGainNodeRef.current.connect(processorRef.current);
-      processorRef.current.connect(audioContextRef.current.destination);
+      // Node must connect to output destination to activate processing
+      workletNode.connect(audioContextRef.current.destination);
       
-      processorRef.current.onaudioprocess = (e) => {
+      workletNode.port.onmessage = (e) => {
         if (roleRef.current !== 'sender') return;
-        const pcmData = e.inputBuffer.getChannelData(0);
-        
-        // Convert Float32 to Int16 directly (lossless bit-depth reduction)
-        const processedBuffer = convertFloat32ToInt16(pcmData);
+        const processedBuffer = e.data;
         
         // Track byte telemetry
         bytesCountRef.current += processedBuffer.byteLength;
