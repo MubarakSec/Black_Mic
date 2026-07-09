@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
-import { Volume2, CheckCircle2, Activity, Video, Square, RefreshCw, AlertTriangle } from 'lucide-react';
+import { Volume2, CheckCircle2, Activity, Video, Square, RefreshCw, AlertTriangle, Mic } from 'lucide-react';
 import fixWebmDuration from 'fix-webm-duration';
 import RoomSelector from './components/RoomSelector';
 import TelemetryStrip from './components/TelemetryStrip';
@@ -9,6 +9,12 @@ import LoggerPanel from './components/LoggerPanel';
 import RecordingLibrary from './components/RecordingLibrary';
 import {
   DEFAULT_ROOM_ID,
+  LS_ROOM_ID,
+  LS_INPUT_GAIN,
+  LS_OUTPUT_VOLUME,
+  LS_CHANNEL_MODE,
+  CHANNEL_MONO,
+  CHANNEL_STEREO,
   TELEMETRY_POLL_INTERVAL_MS,
   WATCHDOG_CHECK_INTERVAL_MS,
   SILENCE_THRESHOLD_MS,
@@ -28,21 +34,26 @@ import {
 import './index.css';
 
 function App() {
-  const [role, setRole] = useState(null); // 'sender' | 'receiver'
-  const [roomId, setRoomId] = useState(DEFAULT_ROOM_ID);
+  const [role, setRole] = useState(null);
+  const [roomId, setRoomId] = useState(() => localStorage.getItem(LS_ROOM_ID) || DEFAULT_ROOM_ID);
   const [status, setStatus] = useState('Waiting to connect...');
   const [volume, setVolume] = useState(0);
   const [logs, setLogs] = useState([]);
   const [isRecording, setIsRecording] = useState(false);
-  const [isMonitoring, setIsMonitoring] = useState(false); // Default false to prevent echo
-  
-  // Volume state
-  const [inputGain, setInputGain] = useState(1.0);
-  const [outputVolume, setOutputVolume] = useState(1.0);
+  const [isAudioRecording, setIsAudioRecording] = useState(false);
+  const [isMonitoring, setIsMonitoring] = useState(false);
 
-  // Remote control states (controls the phone microphone from the PC receiver)
+  // Volume state — persisted
+  const [inputGain, setInputGain] = useState(() => parseFloat(localStorage.getItem(LS_INPUT_GAIN) || '1.0'));
+  const [outputVolume, setOutputVolume] = useState(() => parseFloat(localStorage.getItem(LS_OUTPUT_VOLUME) || '1.0'));
+
+  // Channel mode state — persisted
+  const [channelMode, setChannelMode] = useState(() => localStorage.getItem(LS_CHANNEL_MODE) || 'mono');
+
+  // Remote control states
   const [remotePhoneGain, setRemotePhoneGain] = useState(1.0);
   const [isPhoneMuted, setIsPhoneMuted] = useState(false);
+  const [remoteAckMsg, setRemoteAckMsg] = useState(null); // PC-side confirmation badge
 
   // Connection Telemetry state
   const [latency, setLatency] = useState(null);
@@ -84,9 +95,17 @@ function App() {
   const bytesCountRef = useRef(0);
 
 
+  // Audio-only recording refs
+  const audioRecorderRef = useRef(null);
+  const audioChunksRef = useRef([]);
+
   // Connection loss watchdog refs
   const lastChunkTimeRef = useRef(0);
   const hasConnectedOnceRef = useRef(false);
+
+  // Keep roomId accessible inside socket callbacks without dependency issues
+  const roomIdRef = useRef(roomId);
+  useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
 
   // Screen Wake Lock ref (keeps phone screen awake while streaming)
   const wakeLockRef = useRef(null);
@@ -101,11 +120,24 @@ function App() {
   }, [role]);
 
   useEffect(() => {
-    // Initialize Socket.io connection (pointing to origin, works through Vite proxy!)
-    socketRef.current = io();
+    socketRef.current = io({ reconnection: true, reconnectionDelay: 1000, reconnectionAttempts: Infinity });
 
     socketRef.current.on('connect', () => {
       addLog('✅ Connected to Node Server');
+      if (roleRef.current) {
+        socketRef.current.emit('join-room', roomIdRef.current);
+        addLog(`🔄 Auto-rejoined room: ${roomIdRef.current}`);
+        setStatus(roleRef.current === 'sender' ? 'Broadcasting lossless audio! 🔴' : 'Connected! Audio streaming perfectly. 🔴');
+        setIsSignalLost(false);
+      }
+    });
+
+    socketRef.current.on('disconnect', (reason) => {
+      addLog(`⚠️ Socket disconnected: ${reason}`);
+    });
+
+    socketRef.current.on('reconnect', (attempt) => {
+      addLog(`✅ Reconnected after ${attempt} attempt(s)`);
     });
 
     return () => {
@@ -113,6 +145,12 @@ function App() {
       cleanupAudio();
     };
   }, []);
+
+  // Persist settings to localStorage whenever they change
+  useEffect(() => { localStorage.setItem(LS_ROOM_ID, roomId); }, [roomId]);
+  useEffect(() => { localStorage.setItem(LS_INPUT_GAIN, inputGain); }, [inputGain]);
+  useEffect(() => { localStorage.setItem(LS_OUTPUT_VOLUME, outputVolume); }, [outputVolume]);
+  useEffect(() => { localStorage.setItem(LS_CHANNEL_MODE, channelMode); }, [channelMode]);
 
   // Update sender gain node dynamically when slider moves
   useEffect(() => {
@@ -148,13 +186,27 @@ function App() {
             senderGainNodeRef.current.gain.value = value;
           }
           addLog(`🎛️ Remote Gain set to ${Math.round(value * 100)}%`);
+          // Send ACK back to PC
+          socketRef.current.emit('remote-control-ack', { type: 'gain', value }, roomIdRef.current);
         } else if (type === 'mute') {
           setIsPhoneMuted(value);
           if (senderGainNodeRef.current) {
             senderGainNodeRef.current.gain.value = value ? 0 : inputGain;
           }
           addLog(value ? '🔇 Remote Muted by PC' : '🔊 Remote Unmuted by PC');
+          socketRef.current.emit('remote-control-ack', { type: 'mute', value }, roomIdRef.current);
         }
+      });
+    }
+
+    // ACK listener on PC receiver side
+    if (role === 'receiver') {
+      socketRef.current.on('remote-control-ack', (cmd) => {
+        const msg = cmd.type === 'mute'
+          ? (cmd.value ? '🔇 Phone confirmed: Muted' : '🔊 Phone confirmed: Unmuted')
+          : `✅ Phone confirmed gain: ${Math.round(cmd.value * 100)}%`;
+        setRemoteAckMsg(msg);
+        setTimeout(() => setRemoteAckMsg(null), 2500);
       });
     }
 
@@ -175,6 +227,7 @@ function App() {
       if (socketRef.current) {
         socketRef.current.off('pong-rtt');
         socketRef.current.off('remote-control');
+        socketRef.current.off('remote-control-ack');
       }
     };
   }, [role, inputGain]);
@@ -397,7 +450,7 @@ function App() {
       // Request Screen Wake Lock to keep phone display from auto-sleeping
       await requestWakeLock();
 
-      // Audio capture constraints (disabled echo cancellation/noise suppression for studio capture)
+      // Audio capture constraints
       const stream = await navigator.mediaDevices.getUserMedia({ 
         audio: { 
           echoCancellation: false, 
@@ -405,12 +458,12 @@ function App() {
           noiseSuppression: false,
           latency: 0,
           sampleRate: MICROPHONE_SAMPLE_RATE,
-          channelCount: 1
+          channelCount: channelMode === 'stereo' ? CHANNEL_STEREO : CHANNEL_MONO
         } 
       });
       localStreamRef.current = stream;
       setStatus('Microphone active. Processing audio...');
-      addLog('✅ Mic active! Initializing Web Audio...');
+      addLog(`✅ Mic active! Mode: ${channelMode.toUpperCase()} | Initializing Web Audio...`);
       
       // Enforce 44.1kHz or 48kHz depending on device default
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
@@ -614,6 +667,46 @@ function App() {
       animationRef.current = requestAnimationFrame(updateVisualizer);
     };
     updateVisualizer();
+  };
+
+  const startAudioOnlyRecording = () => {
+    if (!destRef.current) return;
+    const audioStream = destRef.current.stream;
+    if (!audioStream || audioStream.getAudioTracks().length === 0) {
+      addLog('❌ No audio stream available to record.');
+      return;
+    }
+    const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+      ? 'audio/webm;codecs=opus'
+      : 'audio/webm';
+    audioChunksRef.current = [];
+    audioRecorderRef.current = new MediaRecorder(audioStream, { mimeType });
+    audioRecorderRef.current.ondataavailable = (e) => {
+      if (e.data.size > 0) audioChunksRef.current.push(e.data);
+    };
+    audioRecorderRef.current.onstop = () => {
+      const blob = new Blob(audioChunksRef.current, { type: mimeType });
+      const url = URL.createObjectURL(blob);
+      const timestamp = new Date().toLocaleTimeString();
+      const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
+      setRecordings(prev => [{ id: Date.now(), url, timestamp, duration: 'Audio only', size: `${sizeMB} MB`, mimeType, filename: `bms-audio-${Date.now()}` }, ...prev]);
+      addLog(`💾 Audio-only take saved! Size: ${sizeMB} MB`);
+      // Auto-download
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `bms-audio-${Date.now()}.webm`;
+      a.click();
+    };
+    audioRecorderRef.current.start(1000);
+    setIsAudioRecording(true);
+    addLog('🎙️ Audio-only recording ACTIVE!');
+  };
+
+  const stopAudioOnlyRecording = () => {
+    if (audioRecorderRef.current && audioRecorderRef.current.state !== 'inactive') {
+      audioRecorderRef.current.stop();
+    }
+    setIsAudioRecording(false);
   };
 
   const startScreenRecording = async () => {
@@ -872,23 +965,43 @@ function App() {
         {/* Visualizer Panel (VU Meter & Spectrum Canvas) */}
         <VisualizerPanel role={role} volume={volume} canvasRef={canvasRef} />
 
-        {/* Volume / Gain controls */}
         {role === 'sender' && (
-          <div className="slider-container">
-            <div className="slider-label">
-              <span>🎙️ Microphone Input Gain</span>
-              <span style={{ fontFamily: 'JetBrains Mono', color: 'var(--accent-1)' }}>{Math.round(inputGain * 100)}%</span>
+          <>
+            <div className="slider-container">
+              <div className="slider-label">
+                <span>🎙️ Microphone Input Gain</span>
+                <span style={{ fontFamily: 'JetBrains Mono', color: 'var(--accent-1)' }}>{Math.round(inputGain * 100)}%</span>
+              </div>
+              <input 
+                type="range" 
+                min="0" 
+                max="2" 
+                step="0.05" 
+                value={inputGain} 
+                onChange={(e) => setInputGain(parseFloat(e.target.value))}
+                className="slider-input accent-sender"
+              />
             </div>
-            <input 
-              type="range" 
-              min="0" 
-              max="2" 
-              step="0.05" 
-              value={inputGain} 
-              onChange={(e) => setInputGain(parseFloat(e.target.value))}
-              className="slider-input accent-sender"
-            />
-          </div>
+            <div className="slider-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem' }}>
+              <span style={{ fontSize: '0.85rem' }}>🎵 Channel Mode</span>
+              <div style={{ display: 'flex', gap: '0.5rem' }}>
+                <button
+                  className="btn-control"
+                  style={{ padding: '0.35rem 0.85rem', fontSize: '0.78rem', background: channelMode === 'mono' ? 'rgba(0, 245, 140, 0.1)' : 'rgba(255,255,255,0.02)', color: channelMode === 'mono' ? 'var(--accent-1)' : '#fff', borderColor: channelMode === 'mono' ? 'var(--accent-1)' : 'var(--panel-border)' }}
+                  onClick={() => setChannelMode('mono')}
+                >
+                  MONO
+                </button>
+                <button
+                  className="btn-control"
+                  style={{ padding: '0.35rem 0.85rem', fontSize: '0.78rem', background: channelMode === 'stereo' ? 'rgba(0, 210, 255, 0.1)' : 'rgba(255,255,255,0.02)', color: channelMode === 'stereo' ? 'var(--accent-2)' : '#fff', borderColor: channelMode === 'stereo' ? 'var(--accent-2)' : 'var(--panel-border)' }}
+                  onClick={() => setChannelMode('stereo')}
+                >
+                  STEREO
+                </button>
+              </div>
+            </div>
+          </>
         )}
 
         {role === 'receiver' && (
@@ -941,6 +1054,12 @@ function App() {
               onChange={handleRemoteGainChange}
               className="slider-input accent-sender"
             />
+            {/* ACK confirmation badge */}
+            {remoteAckMsg && (
+              <div style={{ marginTop: '0.6rem', fontSize: '0.75rem', color: 'var(--success-color)', fontFamily: 'JetBrains Mono', animation: 'fadeIn 0.2s ease' }}>
+                {remoteAckMsg}
+              </div>
+            )}
           </div>
         )}
 
@@ -960,7 +1079,26 @@ function App() {
             >
               {isMonitoring ? '🔊 Feedback Active' : '🔇 Enable Live Feedback'}
             </button>
-            
+
+            {/* Audio-only recording button */}
+            {!isAudioRecording ? (
+              <button 
+                className="btn-control" 
+                style={{ background: 'rgba(0, 245, 140, 0.06)', color: 'var(--accent-1)', borderColor: 'rgba(0, 245, 140, 0.2)', display: 'flex', alignItems: 'center', gap: '0.5rem' }} 
+                onClick={startAudioOnlyRecording}
+              >
+                <Mic size={16} /> Record Audio Only
+              </button>
+            ) : (
+              <button 
+                className="btn-control" 
+                style={{ background: 'rgba(255, 204, 0, 0.08)', color: '#ffcc00', borderColor: 'rgba(255, 204, 0, 0.2)', display: 'flex', alignItems: 'center', gap: '0.5rem' }} 
+                onClick={stopAudioOnlyRecording}
+              >
+                <Square size={16} /> Stop Audio Recording
+              </button>
+            )}
+
             {!isRecording ? (
               <button 
                 className="btn-control" 
@@ -975,7 +1113,7 @@ function App() {
                 style={{ background: 'rgba(255, 204, 0, 0.08)', color: '#ffcc00', borderColor: 'rgba(255, 204, 0, 0.2)', display: 'flex', alignItems: 'center', gap: '0.5rem' }} 
                 onClick={stopScreenRecording}
               >
-                <Square size={16} /> Stop Recording
+                <Square size={16} /> Stop Screen Recording
               </button>
             )}
           </div>

@@ -1,6 +1,16 @@
 // Room Identification Configuration
 export const DEFAULT_ROOM_ID = 'ROOM';
 export const MAX_ROOM_ID_LENGTH = 12;
+
+// LocalStorage persistence keys
+export const LS_ROOM_ID = 'bms_roomId';
+export const LS_INPUT_GAIN = 'bms_inputGain';
+export const LS_OUTPUT_VOLUME = 'bms_outputVolume';
+export const LS_CHANNEL_MODE = 'bms_channelMode'; // 'mono' | 'stereo'
+
+// Audio channel modes
+export const CHANNEL_MONO = 1;
+export const CHANNEL_STEREO = 2;
 export const ROOM_ID_VALIDATOR_REGEX = /^[A-Z0-9]{3,12}$/;
 
 // Telemetry & Watchdog Configuration
