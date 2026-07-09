@@ -74,6 +74,7 @@ Defaults match a standard local setup, but you can override configurations with 
 PORT=3001
 BMS_SERVER_URL=https://localhost:3001
 BMS_MAX_SOCKET_PAYLOAD_MB=5
+BMS_ALLOWED_ORIGINS=https://your-host.example
 ```
 
 For example, to run on a custom port:
@@ -87,6 +88,7 @@ PORT=4000 ./start.sh
 
 - `server.js` - Express and Socket.IO server.
 - `server/recording.js` - PipeWire/PulseAudio virtual sink setup and audio bridge routing.
+- `server/pcm-utils.js` - PCM conversion helpers used by the server audio bridge.
 - `server/config.js` - Environment-backed server configuration.
 - `client/src/App.jsx` - Main React application logic.
 - `client/src/components/` - Presentational UI console panels.

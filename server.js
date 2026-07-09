@@ -18,7 +18,7 @@ const {
 } = require('./server/socket-validation');
 
 const app = express();
-app.use(cors());
+app.use(cors({ origin: config.corsOrigin }));
 app.use(express.static(path.join(__dirname, 'client/dist')));
 
 // HTTPS if certs exist, HTTP otherwise
@@ -31,7 +31,7 @@ const server = useHttps
   : http.createServer(app);
 
 const io = new Server(server, {
-  cors: { origin: '*', methods: ['GET', 'POST'] },
+  cors: { origin: config.corsOrigin, methods: ['GET', 'POST'] },
   maxHttpBufferSize: config.maxSocketPayloadBytes,
   transports: ['websocket'],
 });

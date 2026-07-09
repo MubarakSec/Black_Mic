@@ -5,6 +5,7 @@ client/node_modules/
 # Production builds
 dist/
 client/dist/
+test-results/
 
 # Log files
 npm-debug.log*

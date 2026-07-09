@@ -1,7 +1,7 @@
 const MIN_SAMPLE_RATE = 8000;
 const MAX_SAMPLE_RATE = 96000;
 const MIN_GAIN = 0;
-const MAX_GAIN = 10;
+const MAX_GAIN = 2;
 const MONO_CHANNELS = 1;
 const STEREO_CHANNELS = 2;
 const PCM_BYTES_PER_SAMPLE = 2;
@@ -9,12 +9,6 @@ const ROOM_ID_REGEX = /^[A-Z0-9]{3,12}$/;
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
-}
-
-function toArrayBuffer(value) {
-  if (value instanceof ArrayBuffer) return value;
-  if (!ArrayBuffer.isView(value)) return null;
-  return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength);
 }
 
 function isValidSampleRate(sampleRate) {

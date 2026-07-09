@@ -1,6 +1,7 @@
 'use strict';
 
 const { spawn } = require('child_process');
+const { upmixMonoToStereoBuffer } = require('./pcm-utils');
 
 
 /**
@@ -89,23 +90,9 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
   }
 
   // Fast TypedArray upmix: duplicate mono sample to both channels
-  let stereoBuffer;
-  if (channelCount === 1) {
-    const mono = new Int16Array(
-      pcmBuffer.buffer,
-      pcmBuffer.byteOffset,
-      pcmBuffer.byteLength / 2
-    );
-    const stereo = new Int16Array(mono.length * 2);
-    for (let i = 0; i < mono.length; i++) {
-      const sample = mono[i];
-      stereo[i * 2] = sample;
-      stereo[i * 2 + 1] = sample;
-    }
-    stereoBuffer = Buffer.from(stereo.buffer, stereo.byteOffset, stereo.byteLength);
-  } else {
-    stereoBuffer = Buffer.from(pcmBuffer);
-  }
+  const stereoBuffer = channelCount === 1
+    ? upmixMonoToStereoBuffer(pcmBuffer)
+    : Buffer.from(pcmBuffer);
 
   // Aggregate chunks into ~30ms blocks to prevent pipe starvation pops
   s.pcmBufferQueue.push(stereoBuffer);

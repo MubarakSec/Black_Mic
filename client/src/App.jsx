@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AudioLockOverlay from './components/AudioLockOverlay';
 import RoomSelector from './components/RoomSelector';
 import SignalLostOverlay from './components/SignalLostOverlay';
@@ -28,10 +28,10 @@ function App() {
 
   const socketRef = useRef(null);
 
-  const addLog = (msg) => {
+  const addLog = useCallback((msg) => {
     console.log(msg);
     setLogs(prev => [...prev.slice(-6), msg]);
-  };
+  }, []);
 
   // Sync basic state to localStorage
   useEffect(() => { localStorage.setItem(LS_ROOM_ID, roomId); }, [roomId]);
@@ -69,7 +69,6 @@ function App() {
   } = useAudioEngine({
     role,
     channelMode,
-    setChannelMode,
     addLog,
     setStatus,
     socketRef,
@@ -91,7 +90,6 @@ function App() {
     socketRef,
     inputGain,
     setInputGain,
-    isPhoneMuted,
     setIsPhoneMuted,
     setRemotePhoneGain,
     setRemoteAckMsg,
@@ -101,7 +99,6 @@ function App() {
     hasConnectedOnceRef,
     isSignalLost,
     setIsSignalLost,
-    setIsAudioLocked,
   });
 
   // Share the actual socketRef from useSocketConnection with useAudioEngine
