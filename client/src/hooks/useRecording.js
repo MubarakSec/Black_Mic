@@ -103,6 +103,7 @@ export function useRecording({ socketRef, roomIdRef, destRef, addLog }) {
   // VAAPI recording: canvas frames -> server ffmpeg -> ~/Videos/*.mp4
   // -------------------------------------------------------------------------
   const stopVaapiRecording = useCallback(() => {
+    const wasRecording = isVaapiRecordingRef.current;
     isVaapiRecordingRef.current = false;
     setIsVaapiRecording(false);
     cancelAnimationFrame(frameRafRef.current);
@@ -113,6 +114,7 @@ export function useRecording({ socketRef, roomIdRef, destRef, addLog }) {
     }
     screenStreamRef.current?.getTracks().forEach(t => t.stop());
     screenStreamRef.current = null;
+    if (!wasRecording) return;
     socketRef.current?.emit('stop-vaapi-record', roomIdRef.current);
     addLog('⏹️ Stopping VAAPI recording — processing...');
   }, [socketRef, roomIdRef, addLog]);

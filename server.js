@@ -7,6 +7,7 @@ const { Server } = require('socket.io');
 const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
+const config = require('./server/config');
 const recording = require('./server/recording');
 const {
   isValidRemoteCommand,
@@ -33,7 +34,7 @@ const server = useHttps
 
 const io = new Server(server, {
   cors: { origin: '*', methods: ['GET', 'POST'] },
-  maxHttpBufferSize: 5e6, // 5 MB — allows JPEG frame payloads
+  maxHttpBufferSize: config.maxSocketPayloadBytes,
 });
 
 // Track which socket is in which room (for cleanup on disconnect)
@@ -41,6 +42,23 @@ const socketRooms = {};
 
 function hasRoomMembers(roomId) {
   return Object.values(socketRooms).some(entry => entry.roomId === roomId);
+}
+
+function getRoomState(roomId) {
+  return Object.values(socketRooms).reduce((state, entry) => {
+    if (entry.roomId !== roomId) return state;
+    if (entry.role === 'sender') return { ...state, senders: state.senders + 1 };
+    if (entry.role === 'receiver') return { ...state, receivers: state.receivers + 1 };
+    return state;
+  }, { roomId, senders: 0, receivers: 0 });
+}
+
+function emitRoomState(roomId) {
+  io.to(roomId).emit('room-state', getRoomState(roomId));
+}
+
+function warnSocket(socket, message) {
+  socket.emit('server-warning', { message });
 }
 
 function cleanupRoomIfEmpty(roomId) {
@@ -63,6 +81,7 @@ function leaveCurrentRoom(socket) {
   if (!room) return;
   socket.leave(room.roomId);
   delete socketRooms[socket.id];
+  emitRoomState(room.roomId);
   cleanupRoomIfEmpty(room.roomId);
 }
 
@@ -84,7 +103,11 @@ io.on('connection', (socket) => {
     console.log(`[${role || 'unknown'}] ${socket.id} joined room: ${roomId}`);
 
     // Create virtual PipeWire sink when any client joins (safe to call multiple times)
-    if (role === 'receiver') await recording.initRoom(roomId);
+    if (role === 'receiver') {
+      const initResult = await recording.initRoom(roomId);
+      if (!initResult.ok) warnSocket(socket, initResult.message);
+    }
+    emitRoomState(roomId);
   });
 
   socket.on('leave-room', () => {
@@ -115,7 +138,8 @@ io.on('connection', (socket) => {
     if (!isSocketInRoom(socket, roomId)) return;
     if (getSocketRoom(socket)?.role !== 'receiver') return;
     if (!isValidRecordingOptions(opts)) return;
-    recording.startRecording(roomId, io);
+    const result = recording.startRecording(roomId, io);
+    if (!result.ok) warnSocket(socket, result.message);
   });
 
   socket.on('video-frame', (frameBuffer, roomId) => {
@@ -162,7 +186,15 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 3001;
-server.listen(PORT, () => {
-  console.log(`Black Mic Studio server on ${useHttps ? 'HTTPS' : 'HTTP'}:${PORT}`);
+server.on('error', (error) => {
+  if (error.code === 'EADDRINUSE') {
+    console.error(`[BMS] Port ${config.port} is already in use. Set PORT to use a different port.`);
+    process.exit(1);
+  }
+  console.error('[BMS] Server failed:', error.message);
+  process.exit(1);
+});
+
+server.listen(config.port, () => {
+  console.log(`Black Mic Studio server on ${useHttps ? 'HTTPS' : 'HTTP'}:${config.port}`);
 });

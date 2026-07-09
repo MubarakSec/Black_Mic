@@ -1,5 +1,7 @@
 'use strict';
 
+const config = require('./config');
+
 const ROOM_ID_REGEX = /^[A-Z0-9]{3,12}$/;
 const VALID_ROLES = new Set(['sender', 'receiver']);
 const MIN_SAMPLE_RATE = 8000;
@@ -9,7 +11,6 @@ const MAX_GAIN = 2;
 const MONO_CHANNELS = 1;
 const STEREO_CHANNELS = 2;
 const PCM_BYTES_PER_SAMPLE = 2;
-const MAX_BINARY_PAYLOAD_BYTES = 5 * 1024 * 1024;
 const MIN_CAPTURE_DIMENSION = 2;
 const MAX_CAPTURE_DIMENSION = 7680;
 const JPEG_START_BYTE = 0xFF;
@@ -53,7 +54,7 @@ function normalizePcmChunk(chunk) {
   const buffer = toBuffer(chunk.buffer);
   if (!buffer) return null;
   if (buffer.byteLength === 0) return null;
-  if (buffer.byteLength > MAX_BINARY_PAYLOAD_BYTES) return null;
+  if (buffer.byteLength > config.maxSocketPayloadBytes) return null;
 
   const frameSize = PCM_BYTES_PER_SAMPLE * chunk.channelCount;
   if (buffer.byteLength % frameSize !== 0) return null;
@@ -82,7 +83,7 @@ function normalizeVideoFrame(frameBuffer) {
   const buffer = toBuffer(frameBuffer);
   if (!buffer) return null;
   if (buffer.byteLength === 0) return null;
-  if (buffer.byteLength > MAX_BINARY_PAYLOAD_BYTES) return null;
+  if (buffer.byteLength > config.maxSocketPayloadBytes) return null;
   if (buffer[0] !== JPEG_START_BYTE) return null;
   if (buffer[1] !== JPEG_SOI_BYTE) return null;
   return buffer;

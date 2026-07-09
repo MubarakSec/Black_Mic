@@ -53,7 +53,7 @@ body {
 .title {
   font-size: 1.85rem;
   font-weight: 700;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
   color: var(--text-primary);
   margin-bottom: 0.25rem;
 }
@@ -519,6 +519,16 @@ body {
   gap: 1.25rem;
 }
 
+.audio-lock-content h2 {
+  letter-spacing: 0;
+  font-weight: 700;
+}
+
+.audio-lock-content p {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+}
+
 .pulse-icon {
   color: var(--accent-2);
   animation: pulse-glow 2s infinite ease-in-out;
@@ -562,6 +572,23 @@ body {
   pointer-events: auto; /* Allow overlay card buttons/clicks */
 }
 
+.alarm-content svg {
+  margin: 0 auto 0.75rem auto;
+}
+
+.alarm-content h2 {
+  color: #fff;
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin: 0 0 0.5rem 0;
+}
+
+.alarm-content p {
+  color: #ffb3b3;
+  font-size: 0.85rem;
+  margin: 0;
+}
+
 @keyframes flash-alarm {
   0% {
     background: rgba(255, 59, 48, 0.05);
@@ -573,3 +600,13 @@ body {
   }
 }
 
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 0.01ms !important;
+  }
+}

@@ -1,20 +1,12 @@
 'use strict';
 
 const { spawn } = require('child_process');
-const os = require('os');
 const path = require('path');
 const fs = require('fs');
-
-// Intel Haswell iGPU render device (verified working with i965 VA-API driver)
-const VAAPI_DEVICE = '/dev/dri/renderD129';
-const LIBVA_DRIVER = 'i965';
-const VIDEOS_DIR = path.join(os.homedir(), 'Videos');
-const RECORD_FPS = 20;
-const VIDEO_BITRATE = '4M';
-const AUDIO_BITRATE = '192k';
+const config = require('./config');
 
 // Ensure ~/Videos exists
-if (!fs.existsSync(VIDEOS_DIR)) fs.mkdirSync(VIDEOS_DIR, { recursive: true });
+if (!fs.existsSync(config.videosDir)) fs.mkdirSync(config.videosDir, { recursive: true });
 
 /**
  * Per-room session state.
@@ -37,7 +29,7 @@ function spawnPactl(args) {
 }
 
 async function initRoom(roomId) {
-  if (sessions[roomId]) return;
+  if (sessions[roomId]) return { ok: true };
 
   const sinkName = `BMS_${roomId}`;
   const { code, out: moduleId } = await spawnPactl([
@@ -47,12 +39,14 @@ async function initRoom(roomId) {
   ]);
 
   if (code !== 0) {
-    console.error(`[BMS] Failed to create virtual sink for room ${roomId}`);
-    return;
+    const message = `Failed to create virtual sink for room ${roomId}. Is PipeWire/PulseAudio pactl available?`;
+    console.error(`[BMS] ${message}`);
+    return { ok: false, message };
   }
 
   sessions[roomId] = { sinkName, moduleId, audioBridge: null, recorder: null, sampleRate: 48000, channelCount: 1 };
   console.log(`[BMS] Virtual sink ready: ${sinkName} (module ${moduleId})`);
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -73,7 +67,7 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
   if (!s.audioBridge) {
     s.sampleRate = sampleRate;
     s.channelCount = channelCount;
-    const env = { ...process.env, LIBVA_DRIVER_NAME: LIBVA_DRIVER };
+    const env = { ...process.env, LIBVA_DRIVER_NAME: config.libvaDriver };
     const audioBridge = spawn('ffmpeg', [
       '-hide_banner', '-loglevel', 'error',
       '-f', 's16le', '-ar', String(sampleRate), '-ac', String(channelCount), '-i', 'pipe:0',
@@ -97,28 +91,29 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
 
 function startRecording(roomId, io) {
   const s = sessions[roomId];
-  if (!s) return null;
+  if (!s) return { ok: false, message: 'Recording cannot start until the PC receiver room is initialized.' };
   if (s.recorder) {
-    console.warn(`[BMS] Recording already active for room ${roomId}`);
-    return null;
+    const message = `Recording already active for room ${roomId}.`;
+    console.warn(`[BMS] ${message}`);
+    return { ok: false, message };
   }
 
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  const outputFile = path.join(VIDEOS_DIR, `BMS-${ts}.mp4`);
+  const outputFile = path.join(config.videosDir, `BMS-${ts}.mp4`);
   const monitorSource = `${s.sinkName}.monitor`;
-  const env = { ...process.env, LIBVA_DRIVER_NAME: LIBVA_DRIVER };
+  const env = { ...process.env, LIBVA_DRIVER_NAME: config.libvaDriver };
 
   const recorder = spawn('ffmpeg', [
     '-hide_banner', '-loglevel', 'error', '-y',
-    '-vaapi_device', VAAPI_DEVICE,
+    '-vaapi_device', config.vaapiDevice,
     // Video: JPEG frames from browser canvas via stdin pipe
-    '-f', 'image2pipe', '-vcodec', 'mjpeg', '-r', String(RECORD_FPS), '-i', 'pipe:0',
+    '-f', 'image2pipe', '-vcodec', 'mjpeg', '-r', String(config.recordFps), '-i', 'pipe:0',
     // Audio: virtual PipeWire sink monitor (phone mic)
     '-f', 'pulse', '-ac', String(s.channelCount), '-ar', String(s.sampleRate), '-i', monitorSource,
     // VAAPI H.264 encode
     '-vf', 'format=nv12,hwupload',
-    '-c:v', 'h264_vaapi', '-rc_mode', 'VBR', '-b:v', VIDEO_BITRATE,
-    '-c:a', 'aac', '-b:a', AUDIO_BITRATE,
+    '-c:v', 'h264_vaapi', '-rc_mode', 'VBR', '-b:v', config.videoBitrate,
+    '-c:a', 'aac', '-b:a', config.audioBitrate,
     '-vsync', 'cfr', '-async', '1',
     outputFile,
   ], { env });
@@ -137,7 +132,7 @@ function startRecording(roomId, io) {
   });
 
   console.log(`[BMS] VAAPI recording -> ${outputFile}`);
-  return outputFile;
+  return { ok: true, outputFile };
 }
 
 function feedVideoFrame(roomId, frameBuffer) {

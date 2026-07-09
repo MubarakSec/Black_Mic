@@ -1,4 +1,4 @@
-import { defineConfig } from 'vite';
+import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 import fs from 'fs';
 import path from 'path';
@@ -17,16 +17,22 @@ const httpsOptions = hasCert ? {
   cert: fs.readFileSync(certPath)
 } : undefined;
 
-export default defineConfig({
-  plugins: [react()],
-  server: {
-    https: httpsOptions,
-    proxy: {
-      '/socket.io': {
-        target: hasCert ? 'https://localhost:3001' : 'http://localhost:3001',
-        ws: true,
-        secure: false // Bypass self-signed certificate warnings in dev
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, path.resolve(__dirname, '..'), '');
+  const port = env.PORT || '3001';
+  const proxyTarget = env.BMS_SERVER_URL || `${hasCert ? 'https' : 'http'}://localhost:${port}`;
+
+  return {
+    plugins: [react()],
+    server: {
+      https: httpsOptions,
+      proxy: {
+        '/socket.io': {
+          target: proxyTarget,
+          ws: true,
+          secure: false // Bypass self-signed certificate warnings in dev
+        }
       }
     }
-  }
+  };
 });

@@ -1,12 +1,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { io } from 'socket.io-client';
-import { Volume2, CheckCircle2, Activity, Square, RefreshCw, AlertTriangle, Mic, Video } from 'lucide-react';
+import AudioLockOverlay from './components/AudioLockOverlay';
 import RoomSelector from './components/RoomSelector';
-import TelemetryStrip from './components/TelemetryStrip';
-import VisualizerPanel from './components/VisualizerPanel';
-import LoggerPanel from './components/LoggerPanel';
-import RecordingLibrary from './components/RecordingLibrary';
+import SignalLostOverlay from './components/SignalLostOverlay';
+import StudioConsole from './components/StudioConsole';
 import { useRecording } from './hooks/useRecording';
+import { isValidRemoteCommand, isValidRoomId, normalizePcmPayload } from './utils/socketValidation';
 import {
   DEFAULT_ROOM_ID,
   LS_ROOM_ID,
@@ -28,33 +27,31 @@ import {
   FFT_SIZE,
 } from './constants';
 import './index.css';
+import './components.css';
 
 function App() {
   const [role, setRole] = useState(null);
   const [roomId, setRoomId] = useState(() => localStorage.getItem(LS_ROOM_ID) || DEFAULT_ROOM_ID);
   const [status, setStatus] = useState('Waiting to connect...');
+  const [operatorIssue, setOperatorIssue] = useState(null);
+  const [roomState, setRoomState] = useState(null);
   const [volume, setVolume] = useState(0);
   const [logs, setLogs] = useState([]);
   const [isMonitoring, setIsMonitoring] = useState(false);
 
-  // Volume state — persisted
   const [inputGain, setInputGain] = useState(() => parseFloat(localStorage.getItem(LS_INPUT_GAIN) || '1.0'));
   const [outputVolume, setOutputVolume] = useState(() => parseFloat(localStorage.getItem(LS_OUTPUT_VOLUME) || '1.0'));
 
-  // Channel mode state — persisted
   const [channelMode, setChannelMode] = useState(() => localStorage.getItem(LS_CHANNEL_MODE) || 'mono');
 
-  // Remote control states
   const [remotePhoneGain, setRemotePhoneGain] = useState(1.0);
   const [isPhoneMuted, setIsPhoneMuted] = useState(false);
   const [remoteAckMsg, setRemoteAckMsg] = useState(null);
 
-  // Connection Telemetry state
   const [latency, setLatency] = useState(null);
   const [bitrate, setBitrate] = useState(null);
   const [packetLoss] = useState(0);
 
-  // Audio Lock & Disconnect Alarm states
   const [isAudioLocked, setIsAudioLocked] = useState(false);
   const [isSignalLost, setIsSignalLost] = useState(false);
 
@@ -66,29 +63,23 @@ function App() {
   const animationRef = useRef(null);
   const roleRef = useRef(null);
   const canvasRef = useRef(null);
+  const cleanupAudioRef = useRef(() => {});
 
-  // Dynamic nodes
   const senderGainNodeRef = useRef(null);
   const receiverGainNodeRef = useRef(null);
 
-  // Audio Queue refs
   const nextPlayTimeRef = useRef(null);
 
-  // Audio destination (needed by useRecording for audio-only capture)
   const destRef = useRef(null);
 
-  // Telemetry counting refs
   const bytesCountRef = useRef(0);
 
-  // Connection loss watchdog refs
   const lastChunkTimeRef = useRef(0);
   const hasConnectedOnceRef = useRef(false);
 
-  // Keep roomId accessible inside callbacks without stale closure
   const roomIdRef = useRef(roomId);
   useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
 
-  // Screen Wake Lock ref
   const wakeLockRef = useRef(null);
 
   const addLog = (msg) => {
@@ -96,11 +87,17 @@ function App() {
     setLogs(prev => [...prev.slice(-6), msg]);
   };
 
-  // Recording logic extracted into hook (keeps App.jsx under 800 lines)
+  const getRemoteAckMessage = (cmd) => {
+    if (cmd.type === 'gain') return `✅ Phone confirmed gain: ${Math.round(cmd.value * 100)}%`;
+    if (cmd.value) return '🔇 Phone confirmed: Muted';
+    return '🔊 Phone confirmed: Unmuted';
+  };
+
   const {
     isAudioRecording, isVaapiRecording, recordings,
     startAudioOnlyRecording, stopAudioOnlyRecording,
     startVaapiRecording, stopVaapiRecording,
+    clearRecordings,
   } = useRecording({ socketRef, roomIdRef, destRef, addLog });
 
   useEffect(() => {
@@ -112,8 +109,9 @@ function App() {
 
     socketRef.current.on('connect', () => {
       addLog('✅ Connected to Node Server');
+      setOperatorIssue(null);
       if (roleRef.current) {
-        socketRef.current.emit('join-room', roomIdRef.current);
+        socketRef.current.emit('join-room', roomIdRef.current, roleRef.current);
         addLog(`🔄 Auto-rejoined room: ${roomIdRef.current}`);
         setStatus(roleRef.current === 'sender' ? 'Broadcasting lossless audio! 🔴' : 'Connected! Audio streaming perfectly. 🔴');
         setIsSignalLost(false);
@@ -128,9 +126,27 @@ function App() {
       addLog(`✅ Reconnected after ${attempt} attempt(s)`);
     });
 
+    socketRef.current.on('room-state', (state) => {
+      if (!state || state.roomId !== roomIdRef.current) return;
+      setRoomState({
+        senders: Number.isInteger(state.senders) ? state.senders : 0,
+        receivers: Number.isInteger(state.receivers) ? state.receivers : 0,
+      });
+    });
+
+    socketRef.current.on('server-warning', (payload) => {
+      if (!payload || typeof payload.message !== 'string') return;
+      setOperatorIssue(payload.message);
+      addLog(`⚠️ ${payload.message}`);
+    });
+
     return () => {
-      if (socketRef.current) socketRef.current.disconnect();
-      cleanupAudio();
+      if (socketRef.current) {
+        socketRef.current.off('room-state');
+        socketRef.current.off('server-warning');
+        socketRef.current.disconnect();
+      }
+      cleanupAudioRef.current();
     };
   }, []);
 
@@ -167,6 +183,7 @@ function App() {
     // Remote control listener (only active on the phone sender)
     if (role === 'sender') {
       socketRef.current.on('remote-control', (cmd) => {
+        if (!isValidRemoteCommand(cmd)) return;
         const { type, value } = cmd;
         if (type === 'gain') {
           setInputGain(value);
@@ -176,7 +193,9 @@ function App() {
           addLog(`🎛️ Remote Gain set to ${Math.round(value * 100)}%`);
           // Send ACK back to PC
           socketRef.current.emit('remote-control-ack', { type: 'gain', value }, roomIdRef.current);
-        } else if (type === 'mute') {
+          return;
+        }
+        if (type === 'mute') {
           setIsPhoneMuted(value);
           if (senderGainNodeRef.current) {
             senderGainNodeRef.current.gain.value = value ? 0 : inputGain;
@@ -190,9 +209,8 @@ function App() {
     // ACK listener on PC receiver side
     if (role === 'receiver') {
       socketRef.current.on('remote-control-ack', (cmd) => {
-        const msg = cmd.type === 'mute'
-          ? (cmd.value ? '🔇 Phone confirmed: Muted' : '🔊 Phone confirmed: Unmuted')
-          : `✅ Phone confirmed gain: ${Math.round(cmd.value * 100)}%`;
+        if (!isValidRemoteCommand(cmd)) return;
+        const msg = getRemoteAckMessage(cmd);
         setRemoteAckMsg(msg);
         setTimeout(() => setRemoteAckMsg(null), 2500);
       });
@@ -378,12 +396,12 @@ function App() {
       audioContextRef.current.close().catch(() => {});
       audioContextRef.current = null;
     }
-    if (mixedContextRef.current) {
-      mixedContextRef.current.close().catch(() => {});
-      mixedContextRef.current = null;
-    }
-    stopScreenRecording();
+    stopVaapiRecording();
   };
+
+  useEffect(() => {
+    cleanupAudioRef.current = cleanupAudio;
+  });
 
   const handleDisconnect = () => {
     addLog('🔌 Disconnecting from studio room...');
@@ -393,16 +411,13 @@ function App() {
       socketRef.current.off('pcm-chunk');
     }
     
-    // Revoke all recording object URLs to release memory
-    recordings.forEach(rec => {
-      URL.revokeObjectURL(rec.url);
-    });
-    setRecordings([]);
+    clearRecordings();
 
     setRole(null);
     setStatus('Waiting to connect...');
+    setOperatorIssue(null);
+    setRoomState(null);
     setIsMonitoring(false);
-    setIsRecording(false);
     setVolume(0);
     setLatency(null);
     setBitrate(null);
@@ -428,7 +443,16 @@ function App() {
     addLog(newMuted ? '🔇 Sent Remote Mute command to phone' : '🔊 Sent Remote Unmute command to phone');
   };
 
+  const validateRoomBeforeStart = () => {
+    if (isValidRoomId(roomId)) return true;
+    setStatus('Room ID must be 3-12 uppercase letters or numbers.');
+    addLog('⚠️ Room ID must be 3-12 uppercase letters or numbers.');
+    return false;
+  };
+
   const startSender = async () => {
+    if (!validateRoomBeforeStart()) return;
+    setOperatorIssue(null);
     setRole('sender');
     socketRef.current.emit('join-room', roomId, 'sender');
     setStatus('Requesting microphone access...');
@@ -522,6 +546,8 @@ function App() {
   }, [channelMode]);
 
   const startReceiver = () => {
+    if (!validateRoomBeforeStart()) return;
+    setOperatorIssue(null);
     setRole('receiver');
     socketRef.current.emit('join-room', roomId, 'receiver');
     setStatus('Waiting for audio stream...');
@@ -563,7 +589,10 @@ function App() {
     // Listen for compressed audio chunks over Socket.io
     socketRef.current.on('pcm-chunk', (data) => {
       if (roleRef.current !== 'receiver') return;
-      const { buffer, sampleRate } = data;
+      if (!audioContextRef.current) return;
+      const pcmData = normalizePcmPayload(data);
+      if (!pcmData) return;
+      const { buffer, sampleRate, channelCount } = pcmData;
 
       // Update watchdog packet arrival timestamp
       lastChunkTimeRef.current = Date.now();
@@ -590,7 +619,7 @@ function App() {
         floatData[i] = intData[i] / 32768.0;
       }
       
-      const channels = data.channelCount || 1;
+      const channels = channelCount;
       const samplesPerChannel = floatData.length / channels;
       const audioBuffer = audioContextRef.current.createBuffer(channels, samplesPerChannel, sampleRate);
       
@@ -727,248 +756,42 @@ function App() {
 
   return (
     <div className="container">
-      {/* Autoplay Audio Block Screen Overlay */}
-      {isAudioLocked && (
-        <div className="audio-lock-overlay" onClick={unlockAudio}>
-          <div className="audio-lock-content">
-            <Volume2 size={64} className="pulse-icon" />
-            <h2 style={{ letterSpacing: '-0.02em', fontWeight: 700 }}>AUDIO OUTPUT LOCKED</h2>
-            <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem' }}>
-              The browser blocked auto-playback. Click anywhere on this screen to unlock the audio stream.
-            </p>
-            <button className="btn-control mt-8">Unlock Audio</button>
-          </div>
-        </div>
-      )}
-
-      {/* Disconnection Warning Alarm Overlay */}
-      {isSignalLost && (
-        <div className="alarm-overlay">
-          <div className="alarm-content">
-            <AlertTriangle size={48} color="var(--danger-color)" style={{ margin: '0 auto 0.75rem auto' }} />
-            <h2 style={{ color: '#fff', fontSize: '1.25rem', fontWeight: 700, margin: '0 0 0.5rem 0' }}>
-              MICROPHONE DISCONNECTED!
-            </h2>
-            <p style={{ color: '#ffb3b3', fontSize: '0.85rem', margin: 0 }}>
-              The audio stream stopped. Check your phone's USB connection.
-            </p>
-          </div>
-        </div>
-      )}
-
-      <div className="console-panel text-center">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1rem', borderBottom: '1px solid var(--panel-border)', paddingBottom: '1rem' }}>
-          <h1 className="title" style={{ fontSize: '1.5rem', textAlign: 'left', margin: 0 }}>
-            {role === 'sender' ? 'Broadcasting Console' : 'Studio Monitor'}
-          </h1>
-          <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
-            <span style={{ fontSize: '0.75rem', fontFamily: 'JetBrains Mono', color: 'var(--text-secondary)' }}>ROOM:</span>
-            <span style={{ fontSize: '0.85rem', fontFamily: 'JetBrains Mono', fontWeight: 'bold', color: '#fff', background: 'rgba(255,255,255,0.05)', padding: '0.25rem 0.5rem', borderRadius: '4px', border: '1px solid var(--panel-border)' }}>
-              {roomId}
-            </span>
-          </div>
-        </div>
-        
-        <div style={{ display: 'flex', justifyContent: 'center' }}>
-          <div className="status-badge">
-            {status.includes('Connected') || status.includes('Streaming') || status.includes('Broadcasting') ? (
-              <CheckCircle2 color="var(--success-color)" size={16} />
-            ) : (
-              <Activity color="var(--warning-color)" size={16} />
-            )}
-            <span>{status}</span>
-          </div>
-        </div>
-
-        {/* Phone Muted Warning Banner */}
-        {role === 'sender' && isPhoneMuted && (
-          <div className="status-badge" style={{ background: 'rgba(255, 59, 48, 0.1)', color: '#ff3b30', borderColor: 'rgba(255, 59, 48, 0.2)', width: '100%', padding: '0.75rem', marginTop: '1rem', display: 'inline-flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center', animation: 'flash-alarm 1s infinite alternate ease-in-out' }}>
-            <AlertTriangle size={16} /> MICROPHONE MUTED BY PC
-          </div>
-        )}
-
-        {/* Keep Phone Tab Visible Warning Banner */}
-        {role === 'sender' && (
-          <div className="status-badge" style={{ background: 'rgba(255, 204, 0, 0.05)', color: 'var(--warning-color)', borderColor: 'rgba(255, 204, 0, 0.15)', width: '100%', padding: '0.75rem', marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', textAlign: 'center' }}>
-            <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center', fontSize: '0.85rem' }}>
-              <AlertTriangle size={14} /> KEEP THIS TAB VISIBLE
-            </div>
-            <div style={{ fontSize: '0.7rem', opacity: 0.8, fontWeight: 500 }}>
-              Switching browser tabs or locking the screen will pause audio capture.
-            </div>
-          </div>
-        )}
-
-        {/* Real-time Connection Telemetry Strip */}
-        <TelemetryStrip latency={latency} bitrate={bitrate} packetLoss={packetLoss} />
-
-        {/* Visualizer Panel (VU Meter & Spectrum Canvas) */}
-        <VisualizerPanel role={role} volume={volume} canvasRef={canvasRef} />
-
-        {role === 'sender' && (
-          <>
-            <div className="slider-container">
-              <div className="slider-label">
-                <span>🎙️ Microphone Input Gain</span>
-                <span style={{ fontFamily: 'JetBrains Mono', color: 'var(--accent-1)' }}>{Math.round(inputGain * 100)}%</span>
-              </div>
-              <input 
-                type="range" 
-                min="0" 
-                max="2" 
-                step="0.05" 
-                value={inputGain} 
-                onChange={(e) => setInputGain(parseFloat(e.target.value))}
-                className="slider-input accent-sender"
-              />
-            </div>
-            <div className="slider-container" style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.75rem 1rem' }}>
-              <span style={{ fontSize: '0.85rem' }}>🎵 Channel Mode</span>
-              <div style={{ display: 'flex', gap: '0.5rem' }}>
-                <button
-                  className="btn-control"
-                  style={{ padding: '0.35rem 0.85rem', fontSize: '0.78rem', background: channelMode === 'mono' ? 'rgba(0, 245, 140, 0.1)' : 'rgba(255,255,255,0.02)', color: channelMode === 'mono' ? 'var(--accent-1)' : '#fff', borderColor: channelMode === 'mono' ? 'var(--accent-1)' : 'var(--panel-border)' }}
-                  onClick={() => setChannelMode('mono')}
-                >
-                  MONO
-                </button>
-                <button
-                  className="btn-control"
-                  style={{ padding: '0.35rem 0.85rem', fontSize: '0.78rem', background: channelMode === 'stereo' ? 'rgba(0, 210, 255, 0.1)' : 'rgba(255,255,255,0.02)', color: channelMode === 'stereo' ? 'var(--accent-2)' : '#fff', borderColor: channelMode === 'stereo' ? 'var(--accent-2)' : 'var(--panel-border)' }}
-                  onClick={() => setChannelMode('stereo')}
-                >
-                  STEREO
-                </button>
-              </div>
-            </div>
-          </>
-        )}
-
-        {role === 'receiver' && (
-          <div className="slider-container">
-            <div className="slider-label">
-              <span>🔊 Speaker Output Volume</span>
-              <span style={{ fontFamily: 'JetBrains Mono', color: 'var(--accent-2)' }}>{Math.round(outputVolume * 100)}%</span>
-            </div>
-            <input 
-              type="range" 
-              min="0" 
-              max="2" 
-              step="0.05" 
-              value={outputVolume} 
-              onChange={(e) => setOutputVolume(parseFloat(e.target.value))}
-              className="slider-input accent-receiver"
-            />
-          </div>
-        )}
-
-        {/* Remote Phone Control Center on PC */}
-        {role === 'receiver' && (
-          <div className="slider-container" style={{ background: 'rgba(255, 255, 255, 0.01)', border: '1px solid var(--panel-border)', padding: '1.25rem', borderRadius: '8px', marginTop: '0.5rem' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
-              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>🎙️ Remote Phone Controls Centre</span>
-              <button 
-                className="btn-control" 
-                style={{ 
-                  padding: '0.35rem 0.75rem', 
-                  fontSize: '0.75rem', 
-                  background: isPhoneMuted ? 'rgba(255, 59, 48, 0.1)' : 'rgba(255,255,255,0.02)',
-                  color: isPhoneMuted ? '#ff3b30' : '#fff',
-                  borderColor: isPhoneMuted ? '#ff3b30' : 'var(--panel-border)'
-                }}
-                onClick={toggleRemoteMute}
-              >
-                {isPhoneMuted ? '🔇 Phone Mic Muted' : '🔊 Mute Phone Mic'}
-              </button>
-            </div>
-            <div className="slider-label" style={{ fontSize: '0.75rem' }}>
-              <span>Remote Microphone Gain</span>
-              <span style={{ fontFamily: 'JetBrains Mono', color: 'var(--accent-1)' }}>{Math.round(remotePhoneGain * 100)}%</span>
-            </div>
-            <input 
-              type="range" 
-              min="0" 
-              max="2" 
-              step="0.05" 
-              value={remotePhoneGain} 
-              onChange={handleRemoteGainChange}
-              className="slider-input accent-sender"
-            />
-            {/* ACK confirmation badge */}
-            {remoteAckMsg && (
-              <div style={{ marginTop: '0.6rem', fontSize: '0.75rem', color: 'var(--success-color)', fontFamily: 'JetBrains Mono', animation: 'fadeIn 0.2s ease' }}>
-                {remoteAckMsg}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* System Telemetry Log panel */}
-        <LoggerPanel logs={logs} />
-
-        {role === 'receiver' && (
-          <div className="control-row">
-            <button
-              className="btn-control"
-              style={{
-                background: isMonitoring ? 'rgba(0, 210, 255, 0.1)' : 'rgba(255, 255, 255, 0.02)',
-                color: isMonitoring ? 'var(--accent-2)' : '#fff',
-                borderColor: isMonitoring ? 'var(--accent-2)' : 'var(--panel-border)'
-              }}
-              onClick={toggleMonitoring}
-            >
-              {isMonitoring ? '🔊 Feedback Active' : '🔇 Enable Live Feedback'}
-            </button>
-
-            {/* Audio-only recording */}
-            {!isAudioRecording ? (
-              <button
-                className="btn-control"
-                style={{ background: 'rgba(0, 245, 140, 0.06)', color: 'var(--accent-1)', borderColor: 'rgba(0, 245, 140, 0.2)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-                onClick={startAudioOnlyRecording}
-              >
-                <Mic size={16} /> Record Audio Only
-              </button>
-            ) : (
-              <button
-                className="btn-control"
-                style={{ background: 'rgba(255, 204, 0, 0.08)', color: '#ffcc00', borderColor: 'rgba(255, 204, 0, 0.2)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-                onClick={stopAudioOnlyRecording}
-              >
-                <Square size={16} /> Stop Audio Recording
-              </button>
-            )}
-
-            {/* VAAPI hardware-encoded screen recording */}
-            {!isVaapiRecording ? (
-              <button
-                className="btn-control"
-                style={{ background: 'rgba(255, 59, 48, 0.08)', color: '#ff3b30', borderColor: 'rgba(255, 59, 48, 0.2)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-                onClick={startVaapiRecording}
-              >
-                <Video size={16} /> Record Screen (VAAPI)
-              </button>
-            ) : (
-              <button
-                className="btn-control"
-                style={{ background: 'rgba(255, 204, 0, 0.08)', color: '#ffcc00', borderColor: 'rgba(255, 204, 0, 0.2)', display: 'flex', alignItems: 'center', gap: '0.5rem' }}
-                onClick={stopVaapiRecording}
-              >
-                <Square size={16} /> Stop VAAPI Recording
-              </button>
-            )}
-          </div>
-        )}
-
-        {/* Recording Library Section */}
-        {role === 'receiver' && recordings.length > 0 && (
-          <RecordingLibrary recordings={recordings} />
-        )}
-
-        <button className="btn-danger mt-8" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', margin: '2rem auto 0 auto' }} onClick={handleDisconnect}>
-          <RefreshCw size={14} /> Disconnect / Restart
-        </button>
-      </div>
+      {isAudioLocked && <AudioLockOverlay onUnlock={unlockAudio} />}
+      {isSignalLost && <SignalLostOverlay />}
+      <StudioConsole
+        role={role}
+        roomId={roomId}
+        status={status}
+        roomState={roomState}
+        operatorIssue={operatorIssue}
+        isPhoneMuted={isPhoneMuted}
+        latency={latency}
+        bitrate={bitrate}
+        packetLoss={packetLoss}
+        volume={volume}
+        canvasRef={canvasRef}
+        inputGain={inputGain}
+        setInputGain={setInputGain}
+        channelMode={channelMode}
+        setChannelMode={setChannelMode}
+        outputVolume={outputVolume}
+        setOutputVolume={setOutputVolume}
+        remotePhoneGain={remotePhoneGain}
+        remoteAckMsg={remoteAckMsg}
+        isMonitoring={isMonitoring}
+        isAudioRecording={isAudioRecording}
+        isVaapiRecording={isVaapiRecording}
+        recordings={recordings}
+        logs={logs}
+        onRemoteGainChange={handleRemoteGainChange}
+        onToggleRemoteMute={toggleRemoteMute}
+        onToggleMonitoring={toggleMonitoring}
+        onStartAudioRecording={startAudioOnlyRecording}
+        onStopAudioRecording={stopAudioOnlyRecording}
+        onStartVaapiRecording={startVaapiRecording}
+        onStopVaapiRecording={stopVaapiRecording}
+        onDisconnect={handleDisconnect}
+      />
     </div>
   );
 }
