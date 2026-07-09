@@ -3,6 +3,11 @@
 const { spawn } = require('child_process');
 const { upmixMonoToStereoBuffer } = require('./pcm-utils');
 
+const DEFAULT_SAMPLE_RATE = 48000;
+const MONO_CHANNEL_COUNT = 1;
+const STEREO_CHANNEL_COUNT = 2;
+const STEREO_CHANNEL_MAP = 'front-left,front-right';
+const PCM_FLUSH_THRESHOLD_BYTES = 5760;
 
 /**
  * Per-room session state.
@@ -31,6 +36,8 @@ async function initRoom(roomId) {
   const { code, out: moduleId } = await spawnPactl([
     'load-module', 'module-null-sink',
     `sink_name=${sinkName}`,
+    `channels=${STEREO_CHANNEL_COUNT}`,
+    `channel_map=${STEREO_CHANNEL_MAP}`,
     `sink_properties=device.description="Black Mic Studio [${roomId}]"`,
   ]);
 
@@ -44,8 +51,8 @@ async function initRoom(roomId) {
     sinkName, 
     moduleId, 
     audioBridge: null, 
-    sampleRate: 48000, 
-    channelCount: 1,
+    sampleRate: DEFAULT_SAMPLE_RATE,
+    channelCount: MONO_CHANNEL_COUNT,
     pcmBufferQueue: [],
     pcmBufferBytes: 0
   };
@@ -77,7 +84,8 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
       `--device=${s.sinkName}`,
       '--format=s16le',
       `--rate=${sampleRate}`,
-      '--channels=2',
+      `--channels=${STEREO_CHANNEL_COUNT}`,
+      `--channel-map=${STEREO_CHANNEL_MAP}`,
       '--latency-msec=30'
     ], { stdio: ['pipe', 'ignore', 'ignore'] });
     s.audioBridge = audioBridge;
@@ -90,7 +98,7 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
   }
 
   // Fast TypedArray upmix: duplicate mono sample to both channels
-  const stereoBuffer = channelCount === 1
+  const stereoBuffer = channelCount === MONO_CHANNEL_COUNT
     ? upmixMonoToStereoBuffer(pcmBuffer)
     : Buffer.from(pcmBuffer);
 
@@ -98,9 +106,7 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
   s.pcmBufferQueue.push(stereoBuffer);
   s.pcmBufferBytes += stereoBuffer.length;
 
-  // 5760 bytes = 30ms of stereo 48kHz s16le (48000 * 2 * 2 * 0.03)
-  const FLUSH_THRESHOLD = 5760;
-  if (s.pcmBufferBytes >= FLUSH_THRESHOLD) {
+  if (s.pcmBufferBytes >= PCM_FLUSH_THRESHOLD_BYTES) {
     const chunk = Buffer.concat(s.pcmBufferQueue);
     if (s.audioBridge.stdin.writable) {
       s.audioBridge.stdin.write(chunk);
