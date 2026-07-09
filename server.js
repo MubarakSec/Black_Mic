@@ -75,6 +75,11 @@ io.on('connection', (socket) => {
     socket.to(roomId).emit('ice-candidate', candidate);
   });
 
+  socket.on('remote-control', (cmd, roomId) => {
+    if (!validateRoomId(roomId)) return;
+    socket.to(roomId).emit('remote-control', cmd);
+  });
+
   socket.on('ping-rtt', (timestamp) => {
     socket.emit('pong-rtt', timestamp);
   });

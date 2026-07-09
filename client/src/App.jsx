@@ -40,6 +40,10 @@ function App() {
   const [inputGain, setInputGain] = useState(1.0);
   const [outputVolume, setOutputVolume] = useState(1.0);
 
+  // Remote control states (controls the phone microphone from the PC receiver)
+  const [remotePhoneGain, setRemotePhoneGain] = useState(1.0);
+  const [isPhoneMuted, setIsPhoneMuted] = useState(false);
+
   // Connection Telemetry state
   const [latency, setLatency] = useState(null);
   const [bitrate, setBitrate] = useState(null);
@@ -134,6 +138,26 @@ function App() {
       setLatency(rtt);
     });
 
+    // Remote control listener (only active on the phone sender)
+    if (role === 'sender') {
+      socketRef.current.on('remote-control', (cmd) => {
+        const { type, value } = cmd;
+        if (type === 'gain') {
+          setInputGain(value);
+          if (senderGainNodeRef.current) {
+            senderGainNodeRef.current.gain.value = value;
+          }
+          addLog(`🎛️ Remote Gain set to ${Math.round(value * 100)}%`);
+        } else if (type === 'mute') {
+          setIsPhoneMuted(value);
+          if (senderGainNodeRef.current) {
+            senderGainNodeRef.current.gain.value = value ? 0 : inputGain;
+          }
+          addLog(value ? '🔇 Remote Muted by PC' : '🔊 Remote Unmuted by PC');
+        }
+      });
+    }
+
     const interval = setInterval(() => {
       if (socketRef.current && socketRef.current.connected) {
         // Measure ping
@@ -150,9 +174,10 @@ function App() {
       clearInterval(interval);
       if (socketRef.current) {
         socketRef.current.off('pong-rtt');
+        socketRef.current.off('remote-control');
       }
     };
-  }, [role]);
+  }, [role, inputGain]);
 
   // Disconnection Watchdog (checks if chunks stop arriving)
   useEffect(() => {
@@ -343,6 +368,23 @@ function App() {
     setIsAudioLocked(false);
     setIsSignalLost(false);
     hasConnectedOnceRef.current = false;
+  };
+
+  const handleRemoteGainChange = (e) => {
+    const val = parseFloat(e.target.value);
+    setRemotePhoneGain(val);
+    if (socketRef.current) {
+      socketRef.current.emit('remote-control', { type: 'gain', value: val }, roomId);
+    }
+  };
+
+  const toggleRemoteMute = () => {
+    const newMuted = !isPhoneMuted;
+    setIsPhoneMuted(newMuted);
+    if (socketRef.current) {
+      socketRef.current.emit('remote-control', { type: 'mute', value: newMuted }, roomId);
+    }
+    addLog(newMuted ? '🔇 Sent Remote Mute command to phone' : '🔊 Sent Remote Unmute command to phone');
   };
 
   const startSender = async () => {
@@ -805,6 +847,25 @@ function App() {
           </div>
         </div>
 
+        {/* Phone Muted Warning Banner */}
+        {role === 'sender' && isPhoneMuted && (
+          <div className="status-badge" style={{ background: 'rgba(255, 59, 48, 0.1)', color: '#ff3b30', borderColor: 'rgba(255, 59, 48, 0.2)', width: '100%', padding: '0.75rem', marginTop: '1rem', display: 'inline-flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center', animation: 'flash-alarm 1s infinite alternate ease-in-out' }}>
+            <AlertTriangle size={16} /> MICROPHONE MUTED BY PC
+          </div>
+        )}
+
+        {/* Keep Phone Tab Visible Warning Banner */}
+        {role === 'sender' && (
+          <div className="status-badge" style={{ background: 'rgba(255, 204, 0, 0.05)', color: 'var(--warning-color)', borderColor: 'rgba(255, 204, 0, 0.15)', width: '100%', padding: '0.75rem', marginTop: '1rem', display: 'flex', flexDirection: 'column', gap: '0.25rem', textAlign: 'center' }}>
+            <div style={{ fontWeight: 'bold', display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center', fontSize: '0.85rem' }}>
+              <AlertTriangle size={14} /> KEEP THIS TAB VISIBLE
+            </div>
+            <div style={{ fontSize: '0.7rem', opacity: 0.8, fontWeight: 500 }}>
+              Switching browser tabs or locking the screen will pause audio capture.
+            </div>
+          </div>
+        )}
+
         {/* Real-time Connection Telemetry Strip */}
         <TelemetryStrip latency={latency} bitrate={bitrate} packetLoss={packetLoss} />
 
@@ -844,6 +905,41 @@ function App() {
               value={outputVolume} 
               onChange={(e) => setOutputVolume(parseFloat(e.target.value))}
               className="slider-input accent-receiver"
+            />
+          </div>
+        )}
+
+        {/* Remote Phone Control Center on PC */}
+        {role === 'receiver' && (
+          <div className="slider-container" style={{ background: 'rgba(255, 255, 255, 0.01)', border: '1px solid var(--panel-border)', padding: '1.25rem', borderRadius: '8px', marginTop: '0.5rem' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+              <span style={{ fontSize: '0.85rem', fontWeight: 600 }}>🎙️ Remote Phone Controls Centre</span>
+              <button 
+                className="btn-control" 
+                style={{ 
+                  padding: '0.35rem 0.75rem', 
+                  fontSize: '0.75rem', 
+                  background: isPhoneMuted ? 'rgba(255, 59, 48, 0.1)' : 'rgba(255,255,255,0.02)',
+                  color: isPhoneMuted ? '#ff3b30' : '#fff',
+                  borderColor: isPhoneMuted ? '#ff3b30' : 'var(--panel-border)'
+                }}
+                onClick={toggleRemoteMute}
+              >
+                {isPhoneMuted ? '🔇 Phone Mic Muted' : '🔊 Mute Phone Mic'}
+              </button>
+            </div>
+            <div className="slider-label" style={{ fontSize: '0.75rem' }}>
+              <span>Remote Microphone Gain</span>
+              <span style={{ fontFamily: 'JetBrains Mono', color: 'var(--accent-1)' }}>{Math.round(remotePhoneGain * 100)}%</span>
+            </div>
+            <input 
+              type="range" 
+              min="0" 
+              max="2" 
+              step="0.05" 
+              value={remotePhoneGain} 
+              onChange={handleRemoteGainChange}
+              className="slider-input accent-sender"
             />
           </div>
         )}
