@@ -98,9 +98,24 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
   }
 
   // Fast TypedArray upmix: duplicate mono sample to both channels
-  const stereoBuffer = channelCount === MONO_CHANNEL_COUNT
-    ? upmixMonoToStereoBuffer(pcmBuffer)
-    : Buffer.from(pcmBuffer);
+  let stereoBuffer;
+  if (channelCount === 1) {
+    // pcmBuffer's byteOffset is odd (5), which throws RangeError in Int16Array.
+    // Copying to a new ArrayBuffer guarantees a 0 (aligned) offset!
+    const alignedBuffer = new ArrayBuffer(pcmBuffer.byteLength);
+    new Uint8Array(alignedBuffer).set(pcmBuffer);
+    
+    const mono = new Int16Array(alignedBuffer);
+    const stereo = new Int16Array(mono.length * 2);
+    for (let i = 0; i < mono.length; i++) {
+      const sample = mono[i];
+      stereo[i * 2] = sample;
+      stereo[i * 2 + 1] = sample;
+    }
+    stereoBuffer = Buffer.from(stereo.buffer, stereo.byteOffset, stereo.byteLength);
+  } else {
+    stereoBuffer = Buffer.from(pcmBuffer);
+  }
 
   // Aggregate chunks into ~30ms blocks to prevent pipe starvation pops
   s.pcmBufferQueue.push(stereoBuffer);
