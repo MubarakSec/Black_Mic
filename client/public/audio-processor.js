@@ -3,6 +3,7 @@ const PCM_POSITIVE_SCALE = 0x7FFF;
 const SAMPLE_MIN = -1;
 const SAMPLE_MAX = 1;
 const PCM_BYTES_PER_SAMPLE = 2;
+const BATCH_FRAMES = 512; // ~10.7ms at 48kHz
 
 function clampSample(sample) {
   if (sample < SAMPLE_MIN) return SAMPLE_MIN;
@@ -20,6 +21,15 @@ class AudioProcessor extends AudioWorkletProcessor {
     super();
     this.isStereo = options?.processorOptions?.isStereo ?? false;
     this.bufferPool = [];
+    this.frameOffset = 0;
+    
+    this.requiredByteLength = BATCH_FRAMES * (this.isStereo ? 2 : 1) * PCM_BYTES_PER_SAMPLE;
+    this.currentBuffer = new ArrayBuffer(this.requiredByteLength);
+    this.currentInt16Array = new Int16Array(this.currentBuffer);
+
+    this.peak = 0;
+    this.sumSquares = 0;
+    this.clippedSamples = 0;
 
     // Listen for returned buffers from the main thread to recycle them
     this.port.onmessage = (e) => {
@@ -27,6 +37,15 @@ class AudioProcessor extends AudioWorkletProcessor {
         this.bufferPool.push(e.data);
       }
     };
+  }
+
+  getBufferFromPool() {
+    for (let i = 0; i < this.bufferPool.length; i++) {
+      if (this.bufferPool[i].byteLength === this.requiredByteLength) {
+        return this.bufferPool.splice(i, 1)[0];
+      }
+    }
+    return new ArrayBuffer(this.requiredByteLength);
   }
 
   process(inputs, _outputs, _parameters) {
@@ -37,43 +56,59 @@ class AudioProcessor extends AudioWorkletProcessor {
     if (!channelLength) return true;
 
     const isStereoActive = this.isStereo && input.length >= 2;
-    const totalSamples = isStereoActive ? channelLength * 2 : channelLength;
-    const requiredByteLength = totalSamples * PCM_BYTES_PER_SAMPLE;
-
-    // Retrieve or allocate an ArrayBuffer from the pool to avoid GC overhead
-    let buffer = null;
-    for (let i = 0; i < this.bufferPool.length; i++) {
-      if (this.bufferPool[i].byteLength === requiredByteLength) {
-        buffer = this.bufferPool.splice(i, 1)[0];
-        break;
-      }
-    }
-    if (!buffer) {
-      buffer = new ArrayBuffer(requiredByteLength);
-    }
-
-    const int16Array = new Int16Array(buffer);
 
     if (isStereoActive) {
       // Stereo: interleave channels L[0], R[0], L[1], R[1]...
       for (let i = 0; i < channelLength; i++) {
-        int16Array[i * 2] = floatToInt16(input[0][i]);
-        int16Array[i * 2 + 1] = floatToInt16(input[1][i]);
+        const offset = (this.frameOffset + i) * 2;
+        this.currentInt16Array[offset] = floatToInt16(input[0][i]);
+        this.currentInt16Array[offset + 1] = floatToInt16(input[1][i]);
       }
     } else {
-      // Mono: downmix all available input channels (average L + R)
-      const numChannels = input.length;
+      // Mono: just use channel 0 to avoid phase issues from averaging
       for (let i = 0; i < channelLength; i++) {
-        let sum = 0;
-        for (let ch = 0; ch < numChannels; ch++) {
-          sum += input[ch][i];
-        }
-        int16Array[i] = floatToInt16(sum / numChannels);
+        this.currentInt16Array[this.frameOffset + i] = floatToInt16(input[0][i]);
       }
     }
 
-    // Transfer the buffer back to the main thread (zero-copy)
-    this.port.postMessage(buffer, [buffer]);
+    // Telemetry
+    for (let i = 0; i < channelLength; i++) {
+      const sample = input[0][i];
+      this.peak = Math.max(this.peak, Math.abs(sample));
+      this.sumSquares += sample * sample;
+      if (Math.abs(sample) >= 0.999) {
+        this.clippedSamples++;
+      }
+    }
+
+    this.frameOffset += channelLength;
+
+    // Once we hit our batch size, send it and swap buffers
+    if (this.frameOffset >= BATCH_FRAMES) {
+      const bufferToSend = this.currentBuffer;
+      
+      this.currentBuffer = this.getBufferFromPool();
+      this.currentInt16Array = new Int16Array(this.currentBuffer);
+      this.frameOffset = 0;
+
+      const rms = Math.sqrt(this.sumSquares / BATCH_FRAMES);
+      const peakDb = 20 * Math.log10(Math.max(this.peak, 1e-8));
+      const rmsDb = 20 * Math.log10(Math.max(rms, 1e-8));
+      const clipped = this.clippedSamples;
+
+      // Transfer the buffer back to the main thread (zero-copy)
+      this.port.postMessage({
+        buffer: bufferToSend,
+        peakDb,
+        rmsDb,
+        clippedSamples: clipped
+      }, [bufferToSend]);
+
+      this.peak = 0;
+      this.sumSquares = 0;
+      this.clippedSamples = 0;
+    }
+
     return true;
   }
 }

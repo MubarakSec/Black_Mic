@@ -11,6 +11,9 @@ import {
   DEFAULT_ROOM_ID,
   LS_ROOM_ID,
   LS_CHANNEL_MODE,
+  LS_AUDIO_PROFILE,
+  LS_RECEIVER_BUFFER_MS,
+  DEFAULT_RECEIVER_BUFFER_MS,
 } from './constants';
 import './index.css';
 import './components.css';
@@ -19,6 +22,8 @@ function App() {
   const [role, setRole] = useState(null);
   const [roomId, setRoomId] = useState(() => localStorage.getItem(LS_ROOM_ID) || DEFAULT_ROOM_ID);
   const [channelMode, setChannelMode] = useState(() => localStorage.getItem(LS_CHANNEL_MODE) || 'mono');
+  const [audioProfile, setAudioProfile] = useState(() => localStorage.getItem(LS_AUDIO_PROFILE) || 'clean');
+  const [jitterBufferMs, setJitterBufferMs] = useState(() => parseInt(localStorage.getItem(LS_RECEIVER_BUFFER_MS) || DEFAULT_RECEIVER_BUFFER_MS.toString(), 10));
   const [logs, setLogs] = useState([]);
   const [status, setStatus] = useState('Waiting to connect...');
 
@@ -36,6 +41,8 @@ function App() {
   // Sync basic state to localStorage
   useEffect(() => { localStorage.setItem(LS_ROOM_ID, roomId); }, [roomId]);
   useEffect(() => { localStorage.setItem(LS_CHANNEL_MODE, channelMode); }, [channelMode]);
+  useEffect(() => { localStorage.setItem(LS_AUDIO_PROFILE, audioProfile); }, [audioProfile]);
+  useEffect(() => { localStorage.setItem(LS_RECEIVER_BUFFER_MS, jitterBufferMs); }, [jitterBufferMs]);
 
   // Audio Engine Hook (handles audio graphs, nodes, visualizer direct DOM rendering)
   const {
@@ -51,6 +58,7 @@ function App() {
     setIsAudioLocked,
     isSignalLost,
     setIsSignalLost,
+    micSettings,
     destRef,
     lastChunkTimeRef,
     hasConnectedOnceRef,
@@ -69,10 +77,12 @@ function App() {
   } = useAudioEngine({
     role,
     channelMode,
+    audioProfile,
     addLog,
     setStatus,
     socketRef,
     roomId,
+    jitterBufferMs,
   });
 
   // Socket Connection Hook (handles Socket.IO, pcm-chunk relay, RTT ping, bitrate calculation)
@@ -104,15 +114,15 @@ function App() {
   // Share the actual socketRef from useSocketConnection with useAudioEngine
   const audioContextRefSynced = useRef(false);
   useEffect(() => {
-    // Dynamic binding to restart sender if channel mode changes
+    // Dynamic binding to restart sender if channel mode or profile changes
     if (role === 'sender' && audioContextRefSynced.current) {
-      addLog(`🔄 Channel mode changed to ${channelMode.toUpperCase()}. Restarting mic stream...`);
+      addLog(`🔄 Settings changed. Restarting mic stream...`);
       cleanupAudio();
       startSender();
     }
     audioContextRefSynced.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channelMode]);
+  }, [channelMode, audioProfile]);
 
   // Recording Hook
   const {
@@ -201,6 +211,7 @@ function App() {
         latency={latency}
         bitrate={bitrate}
         underruns={underruns}
+        micSettings={micSettings}
         canvasRef={canvasRef}
         orbRef={orbRef}
         iconRef={iconRef}
@@ -210,8 +221,12 @@ function App() {
         setInputGain={setInputGain}
         channelMode={channelMode}
         setChannelMode={setChannelMode}
+        audioProfile={audioProfile}
+        setAudioProfile={setAudioProfile}
         outputVolume={outputVolume}
         setOutputVolume={setOutputVolume}
+        jitterBufferMs={jitterBufferMs}
+        setJitterBufferMs={setJitterBufferMs}
         remotePhoneGain={remotePhoneGain}
         remoteAckMsg={remoteAckMsg}
         isMonitoring={isMonitoring}

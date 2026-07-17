@@ -7,6 +7,8 @@ export const LS_ROOM_ID = 'bms_roomId';
 export const LS_INPUT_GAIN = 'bms_inputGain';
 export const LS_OUTPUT_VOLUME = 'bms_outputVolume';
 export const LS_CHANNEL_MODE = 'bms_channelMode'; // 'mono' | 'stereo'
+export const LS_AUDIO_PROFILE = 'bms_audioProfile';
+export const LS_RECEIVER_BUFFER_MS = 'bms_receiverBufferMs';
 
 // Audio channel modes
 export const CHANNEL_MONO = 1;
@@ -21,7 +23,7 @@ export const SILENCE_THRESHOLD_MS = 2500;
 // Audio Hardware Constraints
 export const MICROPHONE_SAMPLE_RATE = 48000;
 export const LATENCY_HINT = 'interactive';
-export const RECEIVER_TARGET_BUFFER_MS = 60;
+export const DEFAULT_RECEIVER_BUFFER_MS = 15;
 
 // Alarm and Unlock Sound Parameters
 export const ALARM_INTERVAL_MS = 1200;

@@ -5,15 +5,15 @@ const { upmixMonoToStereoBuffer } = require('./pcm-utils');
 
 const DEFAULT_SAMPLE_RATE = 48000;
 const MONO_CHANNEL_COUNT = 1;
-const STEREO_CHANNEL_COUNT = 2;
-const STEREO_CHANNEL_MAP = 'front-left,front-right';
-const PCM_FLUSH_THRESHOLD_BYTES = 5760;
+const MONO_CHANNEL_MAP = 'mono';
+const PCM_FLUSH_THRESHOLD_BYTES = 1920; // 10ms over USB
 
 /**
  * Per-room session state.
- * @type {Record<string, {sinkName, moduleId, audioBridge, sampleRate, channelCount}>}
+ * @type {Record<string, {sinkName, sinkModuleId, sourceModuleId, audioBridge, sampleRate, channelCount}>}
  */
 const sessions = {};
+const initializingRooms = new Map();
 
 // ---------------------------------------------------------------------------
 // Virtual PipeWire sink helpers
@@ -31,33 +31,57 @@ function spawnPactl(args) {
 
 async function initRoom(roomId) {
   if (sessions[roomId]) return { ok: true };
-
-  const sinkName = `BMS_${roomId}`;
-  const { code, out: moduleId } = await spawnPactl([
-    'load-module', 'module-null-sink',
-    `sink_name=${sinkName}`,
-    `channels=${STEREO_CHANNEL_COUNT}`,
-    `channel_map=${STEREO_CHANNEL_MAP}`,
-    `sink_properties=device.description="Black Mic Studio [${roomId}]"`,
-  ]);
-
-  if (code !== 0) {
-    const message = `Failed to create virtual sink for room ${roomId}. Is PipeWire/PulseAudio pactl available?`;
-    console.error(`[BMS] ${message}`);
-    return { ok: false, message };
+  
+  if (initializingRooms.has(roomId)) {
+    return initializingRooms.get(roomId);
   }
 
-  sessions[roomId] = { 
-    sinkName, 
-    moduleId, 
-    audioBridge: null, 
-    sampleRate: DEFAULT_SAMPLE_RATE,
-    channelCount: MONO_CHANNEL_COUNT,
-    pcmBufferQueue: [],
-    pcmBufferBytes: 0
-  };
-  console.log(`[BMS] Virtual sink ready: ${sinkName} (module ${moduleId})`);
-  return { ok: true };
+  const initPromise = (async () => {
+    const sinkName = `BMS_${roomId}_Sink`;
+    const { code: codeSink, out: sinkModuleId } = await spawnPactl([
+      'load-module', 'module-null-sink',
+      `sink_name=${sinkName}`,
+      `channels=${MONO_CHANNEL_COUNT}`,
+      `channel_map=${MONO_CHANNEL_MAP}`,
+      `sink_properties=device.description="BMS Receiver [${roomId}]"`
+    ]);
+
+    if (codeSink !== 0) {
+      const message = `Failed to create virtual sink for room ${roomId}. Is PipeWire/PulseAudio pactl available?`;
+      console.error(`[BMS] ${message}`);
+      return { ok: false, message };
+    }
+
+    const { code: codeSource, out: sourceModuleId } = await spawnPactl([
+      'load-module', 'module-remap-source',
+      `source_name=BlackMic_${roomId}`,
+      `master=${sinkName}.monitor`,
+      `source_properties=device.description="Black Mic"`
+    ]);
+
+    if (codeSource !== 0) {
+      console.warn(`[BMS] Failed to create remap source. The monitor will still work, but won't be named 'Black Mic'.`);
+    }
+
+    sessions[roomId] = { 
+      sinkName, 
+      sinkModuleId,
+      sourceModuleId: codeSource === 0 ? sourceModuleId : null,
+      audioBridge: null, 
+      sampleRate: DEFAULT_SAMPLE_RATE,
+      channelCount: MONO_CHANNEL_COUNT,
+      pcmBufferQueue: [],
+      pcmBufferBytes: 0,
+      isDraining: false
+    };
+    console.log(`[BMS] Virtual mic ready: Black Mic (modules ${sinkModuleId}, ${sourceModuleId || 'none'})`);
+    return { ok: true };
+  })();
+
+  initializingRooms.set(roomId, initPromise);
+  const result = await initPromise;
+  initializingRooms.delete(roomId);
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -78,56 +102,62 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
   if (!s.audioBridge) {
     s.sampleRate = sampleRate;
     s.channelCount = channelCount;
-    // Always output stereo to the virtual sink to fill both L and R
+    // Always output mono to the virtual sink
     const audioBridge = spawn('pacat', [
       '--playback',
       `--device=${s.sinkName}`,
       '--format=s16le',
       `--rate=${sampleRate}`,
-      `--channels=${STEREO_CHANNEL_COUNT}`,
-      `--channel-map=${STEREO_CHANNEL_MAP}`,
-      '--latency-msec=30'
+      `--channels=${MONO_CHANNEL_COUNT}`,
+      `--channel-map=${MONO_CHANNEL_MAP}`,
+      '--latency-msec=10'
     ], { stdio: ['pipe', 'ignore', 'ignore'] });
     s.audioBridge = audioBridge;
     audioBridge.on('error', e => console.error('[BMS] Audio bridge error:', e.message));
+    audioBridge.stdin.on('error', err => {
+      if (err.code === 'EPIPE') {
+        console.error('[BMS] EPIPE on pacat. The bridge died, will restart next frame.');
+        if (s.audioBridge === audioBridge) s.audioBridge = null;
+      } else {
+        console.error('[BMS] Stdin error:', err.message);
+      }
+    });
+    audioBridge.stdin.on('drain', () => {
+      s.isDraining = false;
+    });
     audioBridge.on('close', () => {
       if (s.audioBridge !== audioBridge) return;
       s.audioBridge = null;
     });
-    console.log(`[BMS] pacat audio bridge: ${sampleRate}Hz stereo -> ${s.sinkName}`);
+    console.log(`[BMS] pacat audio bridge: ${sampleRate}Hz mono -> ${s.sinkName}`);
   }
 
-  // Fast TypedArray upmix: duplicate mono sample to both channels
-  let stereoBuffer;
-  if (channelCount === 1) {
-    // pcmBuffer's byteOffset is odd (5), which throws RangeError in Int16Array.
-    // Copying to a new ArrayBuffer guarantees a 0 (aligned) offset!
-    const alignedBuffer = new ArrayBuffer(pcmBuffer.byteLength);
-    new Uint8Array(alignedBuffer).set(pcmBuffer);
-    
-    const mono = new Int16Array(alignedBuffer);
-    const stereo = new Int16Array(mono.length * 2);
-    for (let i = 0; i < mono.length; i++) {
-      const sample = mono[i];
-      stereo[i * 2] = sample;
-      stereo[i * 2 + 1] = sample;
-    }
-    stereoBuffer = Buffer.from(stereo.buffer, stereo.byteOffset, stereo.byteLength);
-  } else {
-    stereoBuffer = Buffer.from(pcmBuffer);
-  }
+  // The client now sends raw buffer, we just pass it straight through (no upmixing)
+  // We guarantee aligned offset by copying to a new buffer
+  const alignedBuffer = new ArrayBuffer(pcmBuffer.byteLength);
+  new Uint8Array(alignedBuffer).set(pcmBuffer);
+  const passThroughBuffer = Buffer.from(alignedBuffer);
 
-  // Aggregate chunks into ~30ms blocks to prevent pipe starvation pops
-  s.pcmBufferQueue.push(stereoBuffer);
-  s.pcmBufferBytes += stereoBuffer.length;
+  // Aggregate chunks into ~10ms blocks to prevent pipe starvation pops
+  s.pcmBufferQueue.push(passThroughBuffer);
+  s.pcmBufferBytes += passThroughBuffer.length;
 
   if (s.pcmBufferBytes >= PCM_FLUSH_THRESHOLD_BYTES) {
     const chunk = Buffer.concat(s.pcmBufferQueue);
-    if (s.audioBridge.stdin.writable) {
-      s.audioBridge.stdin.write(chunk);
-    }
     s.pcmBufferQueue = [];
     s.pcmBufferBytes = 0;
+    
+    if (s.isDraining) {
+      // Drop packet if pipe is full (backpressure) to preserve low latency
+      return;
+    }
+
+    if (s.audioBridge.stdin.writable) {
+      const canAcceptMore = s.audioBridge.stdin.write(chunk);
+      if (!canAcceptMore) {
+        s.isDraining = true; // Wait for drain event
+      }
+    }
   }
 }
 
@@ -150,9 +180,12 @@ function cleanupRoom(roomId) {
 
   stopProcess(s.audioBridge);
 
-  if (s.moduleId) {
-    spawn('pactl', ['unload-module', s.moduleId]).on('error', () => {});
-    console.log(`[BMS] Virtual sink unloaded (module ${s.moduleId})`);
+  if (s.sourceModuleId) {
+    spawn('pactl', ['unload-module', s.sourceModuleId]).on('error', () => {});
+  }
+  if (s.sinkModuleId) {
+    spawn('pactl', ['unload-module', s.sinkModuleId]).on('error', () => {});
+    console.log(`[BMS] Virtual mic unloaded (modules ${s.sinkModuleId}, ${s.sourceModuleId || 'none'})`);
   }
 
   delete sessions[roomId];

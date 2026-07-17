@@ -6,7 +6,6 @@ import {
   CHANNEL_STEREO,
   MICROPHONE_SAMPLE_RATE,
   LATENCY_HINT,
-  RECEIVER_TARGET_BUFFER_MS,
   ALARM_INTERVAL_MS,
   ALARM_PITCH_HZ,
   ALARM_BEEP_DURATION_SEC,
@@ -15,13 +14,18 @@ import {
   FFT_SIZE,
 } from '../constants';
 
-export function useAudioEngine({ role, channelMode, addLog, setStatus, socketRef, roomId }) {
-  const [inputGain, setInputGain] = useState(() => parseFloat(localStorage.getItem(LS_INPUT_GAIN) || '1.0'));
+export function useAudioEngine({ role, channelMode, audioProfile, addLog, setStatus, socketRef, roomId, jitterBufferMs }) {
+  const MAX_INPUT_GAIN = 2.0;
+  const [inputGain, setInputGain] = useState(() => {
+    const stored = parseFloat(localStorage.getItem(LS_INPUT_GAIN) || '1.0');
+    return Math.min(stored, MAX_INPUT_GAIN);
+  });
   const [outputVolume, setOutputVolume] = useState(() => parseFloat(localStorage.getItem(LS_OUTPUT_VOLUME) || '1.0'));
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [underruns, setUnderruns] = useState(0);
   const [isAudioLocked, setIsAudioLocked] = useState(false);
   const [isSignalLost, setIsSignalLost] = useState(false);
+  const [micSettings, setMicSettings] = useState(null);
 
   const localStreamRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -36,6 +40,7 @@ export function useAudioEngine({ role, channelMode, addLog, setStatus, socketRef
   const lastChunkTimeRef = useRef(0);
   const hasConnectedOnceRef = useRef(false);
   const hasSentFirstChunkRef = useRef(false);
+  const telemetryRef = useRef({ peakDb: -100, rmsDb: -100, clippedSamples: 0 });
 
   // Visualizer DOM element refs for high-performance direct rendering
   const canvasRef = useRef(null);
@@ -50,15 +55,23 @@ export function useAudioEngine({ role, channelMode, addLog, setStatus, socketRef
 
   // Update sender gain dynamically
   useEffect(() => {
-    if (senderGainNodeRef.current) {
-      senderGainNodeRef.current.gain.value = inputGain;
+    if (senderGainNodeRef.current && audioContextRef.current) {
+      senderGainNodeRef.current.gain.setTargetAtTime(
+        inputGain,
+        audioContextRef.current.currentTime,
+        0.01
+      );
     }
   }, [inputGain]);
 
   // Update receiver volume dynamically
   useEffect(() => {
-    if (receiverGainNodeRef.current) {
-      receiverGainNodeRef.current.gain.value = outputVolume;
+    if (receiverGainNodeRef.current && audioContextRef.current) {
+      receiverGainNodeRef.current.gain.setTargetAtTime(
+        outputVolume,
+        audioContextRef.current.currentTime,
+        0.01
+      );
     }
   }, [outputVolume]);
 
@@ -176,20 +189,43 @@ export function useAudioEngine({ role, channelMode, addLog, setStatus, socketRef
       const average = sum / bufferLength;
 
       // Direct DOM manipulation of the UI elements for high performance
-      const volumePct = Math.round((average / 255) * 100);
-      
-      if (orbRef.current) {
-        orbRef.current.style.transform = `scale(${1 + (average / 255) * 1.3})`;
-        orbRef.current.style.opacity = `${0.3 + (average / 255) * 0.5}`;
-      }
-      if (iconRef.current) {
-        iconRef.current.style.color = average > 30 ? (role === 'sender' ? 'var(--accent-1)' : 'var(--accent-2)') : '#fff';
-      }
-      if (vuBarRef.current) {
-        vuBarRef.current.style.width = `${volumePct}%`;
-      }
-      if (vuLabelRef.current) {
-        vuLabelRef.current.textContent = `${volumePct}%`;
+      if (role === 'sender' && telemetryRef.current.peakDb !== -100) {
+        const t = telemetryRef.current;
+        const peakPct = Math.max(0, Math.min(100, (t.peakDb + 60) / 60 * 100));
+        
+        if (orbRef.current) {
+          orbRef.current.style.transform = `scale(${1 + (peakPct / 100) * 1.3})`;
+          orbRef.current.style.opacity = `${0.3 + (peakPct / 100) * 0.5}`;
+        }
+        if (iconRef.current) {
+          iconRef.current.style.color = t.clippedSamples > 0 ? '#ff4d4d' : 'var(--accent-1)';
+        }
+        if (vuBarRef.current) {
+          vuBarRef.current.style.width = `${peakPct}%`;
+          vuBarRef.current.style.backgroundColor = t.clippedSamples > 0 ? '#ff4d4d' : 'var(--accent-1)';
+        }
+        if (vuLabelRef.current) {
+          vuLabelRef.current.textContent = `${t.peakDb.toFixed(1)} dB`;
+          vuLabelRef.current.style.color = t.clippedSamples > 0 ? '#ff4d4d' : '#fff';
+        }
+      } else {
+        const volumePct = Math.round((average / 255) * 100);
+        
+        if (orbRef.current) {
+          orbRef.current.style.transform = `scale(${1 + (average / 255) * 1.3})`;
+          orbRef.current.style.opacity = `${0.3 + (average / 255) * 0.5}`;
+        }
+        if (iconRef.current) {
+          iconRef.current.style.color = average > 30 ? (role === 'sender' ? 'var(--accent-1)' : 'var(--accent-2)') : '#fff';
+        }
+        if (vuBarRef.current) {
+          vuBarRef.current.style.width = `${volumePct}%`;
+          vuBarRef.current.style.backgroundColor = role === 'sender' ? 'var(--accent-1)' : 'var(--accent-2)';
+        }
+        if (vuLabelRef.current) {
+          vuLabelRef.current.textContent = `${volumePct}%`;
+          vuLabelRef.current.style.color = '#fff';
+        }
       }
 
       // Draw real-time frequency visualizer on canvas
@@ -227,15 +263,34 @@ export function useAudioEngine({ role, channelMode, addLog, setStatus, socketRef
       await requestWakeLock();
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: false,
+          echoCancellation: audioProfile === 'call',
           autoGainControl: false,
-          noiseSuppression: false,
+          noiseSuppression: audioProfile === 'call',
           latency: 0,
           sampleRate: MICROPHONE_SAMPLE_RATE,
-          channelCount: channelMode === 'stereo' ? CHANNEL_STEREO : CHANNEL_MONO
+          channelCount: channelMode === 'stereo' ? CHANNEL_STEREO : CHANNEL_MONO,
+          advanced: [{
+            echoCancellation: audioProfile === 'call',
+            autoGainControl: false,
+            noiseSuppression: audioProfile === 'call',
+            latency: 0,
+          }]
         }
       });
       localStreamRef.current = stream;
+
+      const track = stream.getAudioTracks()[0];
+      const settings = track.getSettings();
+      setMicSettings({
+        sampleRate: settings.sampleRate,
+        channelCount: settings.channelCount,
+        echoCancellation: settings.echoCancellation,
+        noiseSuppression: settings.noiseSuppression,
+        autoGainControl: settings.autoGainControl,
+        deviceId: settings.deviceId,
+        label: track.label
+      });
+
       setStatus('Microphone active. Processing audio...');
       addLog(`✅ Mic active! Mode: ${channelMode.toUpperCase()} | Initializing Web Audio...`);
 
@@ -246,9 +301,9 @@ export function useAudioEngine({ role, channelMode, addLog, setStatus, socketRef
       addLog('✅ Audio worklet module loaded!');
 
       const source = audioContextRef.current.createMediaStreamSource(stream);
+      
       senderGainNodeRef.current = audioContextRef.current.createGain();
-      senderGainNodeRef.current.gain.value = inputGain;
-
+      senderGainNodeRef.current.gain.setValueAtTime(inputGain, audioContextRef.current.currentTime);
       analyserRef.current = audioContextRef.current.createAnalyser();
 
       const workletNode = new AudioWorkletNode(audioContextRef.current, 'audio-processor', {
@@ -260,13 +315,44 @@ export function useAudioEngine({ role, channelMode, addLog, setStatus, socketRef
       });
       processorRef.current = workletNode;
 
-      source.connect(senderGainNodeRef.current);
+      if (audioProfile === 'clean') {
+        // Clean Voice DSP Chain
+        const highPass = audioContextRef.current.createBiquadFilter();
+        highPass.type = 'highpass';
+        highPass.frequency.value = 80;
+        highPass.Q.value = 0.7;
+
+        const compressor = audioContextRef.current.createDynamicsCompressor();
+        compressor.threshold.value = -18;
+        compressor.knee.value = 8;
+        compressor.ratio.value = 3;
+        compressor.attack.value = 0.005;
+        compressor.release.value = 0.18;
+
+        source.connect(highPass);
+        highPass.connect(compressor);
+        compressor.connect(senderGainNodeRef.current);
+      } else {
+        // Raw or Call mode
+        source.connect(senderGainNodeRef.current);
+      }
+      
       senderGainNodeRef.current.connect(analyserRef.current);
       senderGainNodeRef.current.connect(workletNode);
       workletNode.connect(audioContextRef.current.destination);
 
       workletNode.port.onmessage = (e) => {
-        const processedBuffer = e.data;
+        const payload = e.data;
+        const processedBuffer = payload.buffer || payload;
+
+        if (payload.peakDb !== undefined) {
+          telemetryRef.current = {
+            peakDb: payload.peakDb,
+            rmsDb: payload.rmsDb,
+            clippedSamples: payload.clippedSamples
+          };
+        }
+
         if (!socketRef.current || !socketRef.current.connected) {
           // Recycle the buffer even if socket is disconnected
           workletNode.port.postMessage(processedBuffer, [processedBuffer]);
@@ -315,7 +401,7 @@ export function useAudioEngine({ role, channelMode, addLog, setStatus, socketRef
       receiverPlaybackNodeRef.current = new AudioWorkletNode(audioContextRef.current, 'receiver-playback-processor', {
         outputChannelCount: [CHANNEL_STEREO],
         processorOptions: {
-          targetBufferMs: RECEIVER_TARGET_BUFFER_MS,
+          targetBufferMs: jitterBufferMs,
         },
       });
 
@@ -421,6 +507,7 @@ export function useAudioEngine({ role, channelMode, addLog, setStatus, socketRef
     setIsAudioLocked,
     isSignalLost,
     setIsSignalLost,
+    micSettings,
     destRef,
     lastChunkTimeRef,
     hasConnectedOnceRef,

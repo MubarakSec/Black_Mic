@@ -22,8 +22,8 @@ export default function RemoteControlPanel({
       <input
         type="range"
         min="0"
-        max="10"
-        step="0.05"
+        max="2"
+        step="0.01"
         value={remotePhoneGain}
         onChange={onGainChange}
         className="slider-input accent-sender"

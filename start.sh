@@ -8,7 +8,7 @@
 
 set -uo pipefail
 
-APP_DIR="${BMS_APP_DIR:-/home/mobta/Black_Mic}"
+APP_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 SERVER_PORT="${PORT:-3001}"
 LOG_FILE="$APP_DIR/.server.log"
 PID_FILE="$APP_DIR/.server.pid"
@@ -47,9 +47,15 @@ pactl list short modules 2>/dev/null | grep "BMS_" | awk '{print $1}' | while re
 done
 
 
-# ---- Build client if dist is missing ----------------------
-if [ ! -d "$APP_DIR/client/dist" ] || [ "$APP_DIR/client/src/App.jsx" -nt "$APP_DIR/client/dist/index.html" ]; then
-  echo "[BMS] Building client..."
+# ---- Build client if dist is missing or any src file is newer ------
+NEEDS_BUILD=false
+if [ ! -d "$APP_DIR/client/dist" ]; then
+  NEEDS_BUILD=true
+elif find "$APP_DIR/client/src" "$APP_DIR/client/public" -newer "$APP_DIR/client/dist/index.html" -print -quit 2>/dev/null | grep -q .; then
+  NEEDS_BUILD=true
+fi
+if [ "$NEEDS_BUILD" = true ]; then
+  echo "[BMS] Building client (source changed)..."
   notify "Building client bundle..."
   cd "$APP_DIR/client" && npm run build --silent 2>>"$LOG_FILE"
   cd "$APP_DIR"

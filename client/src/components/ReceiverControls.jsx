@@ -11,6 +11,8 @@ function formatTime(seconds) {
 export default function ReceiverControls({
   outputVolume,
   setOutputVolume,
+  jitterBufferMs,
+  setJitterBufferMs,
   remotePhoneGain,
   isPhoneMuted,
   remoteAckMsg,
@@ -25,6 +27,22 @@ export default function ReceiverControls({
 }) {
   return (
     <>
+      <div className="slider-container">
+        <div className="slider-label">
+          <span>USB Jitter Buffer (Latency)</span>
+          <span className="value-receiver">{jitterBufferMs}ms</span>
+        </div>
+        <input
+          type="range"
+          min="10"
+          max="150"
+          step="5"
+          value={jitterBufferMs}
+          onChange={(e) => setJitterBufferMs(parseInt(e.target.value, 10))}
+          className="slider-input accent-receiver"
+        />
+      </div>
+
       <div className="slider-container">
         <div className="slider-label">
           <span>Speaker Output Volume</span>

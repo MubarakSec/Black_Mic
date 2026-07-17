@@ -19,6 +19,7 @@ export default function StudioConsole({
   latency,
   bitrate,
   underruns,
+  micSettings,
   canvasRef,
   orbRef,
   iconRef,
@@ -28,8 +29,12 @@ export default function StudioConsole({
   setInputGain,
   channelMode,
   setChannelMode,
+  audioProfile,
+  setAudioProfile,
   outputVolume,
   setOutputVolume,
+  jitterBufferMs,
+  setJitterBufferMs,
   remotePhoneGain,
   remoteAckMsg,
   isMonitoring,
@@ -67,6 +72,9 @@ export default function StudioConsole({
           setInputGain={setInputGain}
           channelMode={channelMode}
           setChannelMode={setChannelMode}
+          audioProfile={audioProfile}
+          setAudioProfile={setAudioProfile}
+          micSettings={micSettings}
         />
       )}
 
@@ -74,6 +82,8 @@ export default function StudioConsole({
         <ReceiverControls
           outputVolume={outputVolume}
           setOutputVolume={setOutputVolume}
+          jitterBufferMs={jitterBufferMs}
+          setJitterBufferMs={setJitterBufferMs}
           remotePhoneGain={remotePhoneGain}
           isPhoneMuted={isPhoneMuted}
           remoteAckMsg={remoteAckMsg}
