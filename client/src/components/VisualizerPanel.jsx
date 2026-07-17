@@ -1,8 +1,9 @@
 import React from 'react';
 import { Mic, Volume2 } from 'lucide-react';
+import { ROLE_SENDER } from '../constants';
 
 export default function VisualizerPanel({ role, canvasRef, orbRef, iconRef, vuBarRef, vuLabelRef }) {
-  const isSender = role === 'sender';
+  const isSender = role === ROLE_SENDER;
   
   return (
     <div className="visualizer-section">

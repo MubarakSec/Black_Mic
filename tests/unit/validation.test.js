@@ -2,7 +2,8 @@ import { describe, it, expect } from 'vitest';
 import { isValidRoomId, isValidRemoteCommand, normalizePcmPayload } from '../../client/src/utils/socketValidation';
 import { normalizePcmChunk } from '../../server/socket-validation';
 
-const PCM_HEADER_BYTES = 5;
+const PCM_MAGIC = 0xBC4D;
+const PCM_HEADER_BYTES = 7;
 const TEST_SAMPLE_RATE = 48000;
 const MONO_CHANNELS = 1;
 const INVALID_CHANNEL_COUNT = 3;
@@ -12,8 +13,9 @@ const INVALID_SAMPLE_RATE = 500;
 function createPcmPacket({ sampleRate = TEST_SAMPLE_RATE, channelCount = MONO_CHANNELS } = {}) {
   const packet = new ArrayBuffer(PCM_HEADER_BYTES + PCM_PAYLOAD_BYTES);
   const view = new DataView(packet, 0, PCM_HEADER_BYTES);
-  view.setUint32(0, sampleRate, true);
-  view.setUint8(4, channelCount);
+  view.setUint16(0, PCM_MAGIC, true);
+  view.setUint32(2, sampleRate, true);
+  view.setUint8(6, channelCount);
   return packet;
 }
 

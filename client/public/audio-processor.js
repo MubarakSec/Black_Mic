@@ -57,27 +57,29 @@ class AudioProcessor extends AudioWorkletProcessor {
 
     const isStereoActive = this.isStereo && input.length >= 2;
 
+    // Merge encoding + telemetry into a single loop
+    const monoInput = input[0];
+
     if (isStereoActive) {
-      // Stereo: interleave channels L[0], R[0], L[1], R[1]...
+      const stereoInput1 = input[1];
       for (let i = 0; i < channelLength; i++) {
         const offset = (this.frameOffset + i) * 2;
-        this.currentInt16Array[offset] = floatToInt16(input[0][i]);
-        this.currentInt16Array[offset + 1] = floatToInt16(input[1][i]);
+        const sample = monoInput[i];
+        this.currentInt16Array[offset] = floatToInt16(sample);
+        this.currentInt16Array[offset + 1] = floatToInt16(stereoInput1[i]);
+        const abs = Math.abs(sample);
+        if (abs > this.peak) this.peak = abs;
+        this.sumSquares += sample * sample;
+        if (abs >= 0.999) this.clippedSamples++;
       }
     } else {
-      // Mono: just use channel 0 to avoid phase issues from averaging
       for (let i = 0; i < channelLength; i++) {
-        this.currentInt16Array[this.frameOffset + i] = floatToInt16(input[0][i]);
-      }
-    }
-
-    // Telemetry
-    for (let i = 0; i < channelLength; i++) {
-      const sample = input[0][i];
-      this.peak = Math.max(this.peak, Math.abs(sample));
-      this.sumSquares += sample * sample;
-      if (Math.abs(sample) >= 0.999) {
-        this.clippedSamples++;
+        const sample = monoInput[i];
+        this.currentInt16Array[this.frameOffset + i] = floatToInt16(sample);
+        const abs = Math.abs(sample);
+        if (abs > this.peak) this.peak = abs;
+        this.sumSquares += sample * sample;
+        if (abs >= 0.999) this.clippedSamples++;
       }
     }
 
@@ -86,12 +88,13 @@ class AudioProcessor extends AudioWorkletProcessor {
     // Once we hit our batch size, send it and swap buffers
     if (this.frameOffset >= BATCH_FRAMES) {
       const bufferToSend = this.currentBuffer;
+      const actualFrames = this.frameOffset;
       
       this.currentBuffer = this.getBufferFromPool();
       this.currentInt16Array = new Int16Array(this.currentBuffer);
       this.frameOffset = 0;
 
-      const rms = Math.sqrt(this.sumSquares / BATCH_FRAMES);
+      const rms = Math.sqrt(this.sumSquares / actualFrames);
       const peakDb = 20 * Math.log10(Math.max(this.peak, 1e-8));
       const rmsDb = 20 * Math.log10(Math.max(rms, 1e-8));
       const clipped = this.clippedSamples;

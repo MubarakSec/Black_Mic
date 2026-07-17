@@ -8,6 +8,10 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const config = require('./server/config');
+
+process.on('unhandledRejection', (reason) => {
+  console.error('[BMS] Unhandled Rejection:', reason);
+});
 const recording = require('./server/recording');
 const {
   isValidRemoteCommand,
@@ -15,6 +19,8 @@ const {
   isValidRoomId,
   isValidTimestamp,
   normalizePcmChunk,
+  PCM_MAGIC,
+  HEADER_BYTE_LENGTH,
 } = require('./server/socket-validation');
 
 const app = express();
@@ -87,7 +93,7 @@ function leaveCurrentRoom(socket) {
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
-  socket.on('join-room', async (roomId, role) => {
+  socket.on('join-room', (roomId, role) => {
     if (!isValidRoomId(roomId)) {
       console.warn(`Blocked invalid join-room: "${roomId}" from ${socket.id}`);
       return;
@@ -101,10 +107,13 @@ io.on('connection', (socket) => {
     socketRooms[socket.id] = { roomId, role };
     console.log(`[${role || 'unknown'}] ${socket.id} joined room: ${roomId}`);
 
-    // Create virtual PipeWire sink when any client joins (safe to call multiple times)
+    // Create virtual PipeWire sink when any client joins
     if (role === 'receiver') {
-      const initResult = await recording.initRoom(roomId);
-      if (!initResult.ok) warnSocket(socket, initResult.message);
+      recording.initRoom(roomId).then(initResult => {
+        if (!initResult.ok) warnSocket(socket, initResult.message);
+      }).catch(err => {
+        console.error(`[BMS] initRoom failed for ${roomId}:`, err);
+      });
     }
     emitRoomState(roomId);
   });
@@ -125,8 +134,14 @@ io.on('connection', (socket) => {
     const pcmChunk = normalizePcmChunk(chunk);
     if (!pcmChunk) return;
 
-    // Relay the raw binary chunk directly to the receiver
-    socket.to(roomId).emit('pcm-chunk', chunk);
+    // Relay only the validated PCM payload (reconstructed with header for receiver parsing)
+    const relayBuf = Buffer.alloc(HEADER_BYTE_LENGTH + pcmChunk.buffer.length);
+    relayBuf.writeUInt16LE(PCM_MAGIC, 0);
+    relayBuf.writeUInt32LE(pcmChunk.sampleRate, 2);
+    relayBuf.writeUInt8(pcmChunk.channelCount, 6);
+    pcmChunk.buffer.copy(relayBuf, HEADER_BYTE_LENGTH);
+    socket.to(roomId).emit('pcm-chunk', relayBuf);
+
     // Feed audio to PipeWire virtual sink (phone mic -> system mic)
     recording.feedAudio(roomId, pcmChunk.buffer, pcmChunk.sampleRate, pcmChunk.channelCount);
   });

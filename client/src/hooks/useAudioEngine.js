@@ -12,21 +12,31 @@ import {
   UNLOCK_NOTE_1_HZ,
   UNLOCK_NOTE_2_HZ,
   FFT_SIZE,
+  ROLE_SENDER,
+  ROLE_RECEIVER,
+  CHANNEL_MODE_MONO,
+  CHANNEL_MODE_STEREO,
+  PROFILE_CLEAN,
+  PROFILE_CALL,
 } from '../constants';
 
 export function useAudioEngine({ role, channelMode, audioProfile, addLog, setStatus, socketRef, roomId, jitterBufferMs }) {
   const MAX_INPUT_GAIN = 2.0;
   const [inputGain, setInputGain] = useState(() => {
     const stored = parseFloat(localStorage.getItem(LS_INPUT_GAIN) || '1.0');
-    return Math.min(stored, MAX_INPUT_GAIN);
+    return Number.isFinite(stored) ? Math.min(stored, MAX_INPUT_GAIN) : 1.0;
   });
-  const [outputVolume, setOutputVolume] = useState(() => parseFloat(localStorage.getItem(LS_OUTPUT_VOLUME) || '1.0'));
+  const [outputVolume, setOutputVolume] = useState(() => {
+    const stored = parseFloat(localStorage.getItem(LS_OUTPUT_VOLUME) || '1.0');
+    return Number.isFinite(stored) ? stored : 1.0;
+  });
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [underruns, setUnderruns] = useState(0);
   const [isAudioLocked, setIsAudioLocked] = useState(false);
   const [isSignalLost, setIsSignalLost] = useState(false);
   const [micSettings, setMicSettings] = useState(null);
 
+  const canvasDimsRef = useRef({ width: 0, height: 0 });
   const localStreamRef = useRef(null);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
@@ -75,9 +85,18 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
     }
   }, [outputVolume]);
 
+  // Send jitter buffer changes to the worklet live (no restart needed)
+  useEffect(() => {
+    if (role !== 'receiver' || !receiverPlaybackNodeRef.current) return;
+    receiverPlaybackNodeRef.current.port.postMessage({
+      type: 'set-target-buffer',
+      targetBufferMs: jitterBufferMs,
+    });
+  }, [jitterBufferMs, role]);
+
   // Alarm sound effect when signal is lost
   useEffect(() => {
-    if (!isSignalLost || role !== 'receiver') return;
+    if (!isSignalLost || role !== ROLE_RECEIVER) return;
     playAlarmBeep();
     const alarmInterval = setInterval(playAlarmBeep, ALARM_INTERVAL_MS);
     return () => clearInterval(alarmInterval);
@@ -99,7 +118,7 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
   // Visibility change to request/release wake lock
   useEffect(() => {
     const handleVisibility = async () => {
-      if (role === 'sender' && document.visibilityState === 'visible' && !wakeLockRef.current) {
+      if (role === ROLE_SENDER && document.visibilityState === 'visible' && !wakeLockRef.current) {
         await requestWakeLock();
       }
     };
@@ -189,9 +208,9 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
       const average = sum / bufferLength;
 
       // Direct DOM manipulation of the UI elements for high performance
-      if (role === 'sender' && telemetryRef.current.peakDb !== -100) {
+      if (role === ROLE_SENDER && telemetryRef.current.peakDb !== -100) {
         const t = telemetryRef.current;
-        const peakPct = Math.max(0, Math.min(100, (t.peakDb + 60) / 60 * 100));
+        const peakPct = Math.max(0, Math.min(100, (t.peakDb + 36) / 36 * 100));
         
         if (orbRef.current) {
           orbRef.current.style.transform = `scale(${1 + (peakPct / 100) * 1.3})`;
@@ -216,11 +235,11 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
           orbRef.current.style.opacity = `${0.3 + (average / 255) * 0.5}`;
         }
         if (iconRef.current) {
-          iconRef.current.style.color = average > 30 ? (role === 'sender' ? 'var(--accent-1)' : 'var(--accent-2)') : '#fff';
+          iconRef.current.style.color = average > 30 ? (role === ROLE_SENDER ? 'var(--accent-1)' : 'var(--accent-2)') : '#fff';
         }
         if (vuBarRef.current) {
           vuBarRef.current.style.width = `${volumePct}%`;
-          vuBarRef.current.style.backgroundColor = role === 'sender' ? 'var(--accent-1)' : 'var(--accent-2)';
+          vuBarRef.current.style.backgroundColor = role === ROLE_SENDER ? 'var(--accent-1)' : 'var(--accent-2)';
         }
         if (vuLabelRef.current) {
           vuLabelRef.current.textContent = `${volumePct}%`;
@@ -232,8 +251,11 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
       const canvas = canvasRef.current;
       if (canvas) {
         const ctx = canvas.getContext('2d');
-        const width = canvas.width;
-        const height = canvas.height;
+        if (canvasDimsRef.current.width === 0) {
+          canvasDimsRef.current.width = canvas.width;
+          canvasDimsRef.current.height = canvas.height;
+        }
+        const { width, height } = canvasDimsRef.current;
         ctx.clearRect(0, 0, width, height);
 
         const barWidth = (width / bufferLength) * 1.6;
@@ -242,7 +264,7 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
 
         for (let i = 0; i < bufferLength; i++) {
           barHeight = (dataArray[i] / 255) * height;
-          const activeColor = role === 'sender' ? '#00f58c' : '#00d2ff';
+          const activeColor = role === ROLE_SENDER ? '#00f58c' : '#00d2ff';
           ctx.fillStyle = activeColor;
           ctx.fillRect(x, height - barHeight, barWidth - 2, barHeight);
           x += barWidth;
@@ -263,16 +285,16 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
       await requestWakeLock();
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
-          echoCancellation: audioProfile === 'call',
+          echoCancellation: audioProfile === PROFILE_CALL,
           autoGainControl: false,
-          noiseSuppression: audioProfile === 'call',
+          noiseSuppression: audioProfile === PROFILE_CALL,
           latency: 0,
           sampleRate: MICROPHONE_SAMPLE_RATE,
-          channelCount: channelMode === 'stereo' ? CHANNEL_STEREO : CHANNEL_MONO,
+          channelCount: channelMode === CHANNEL_MODE_STEREO ? CHANNEL_STEREO : CHANNEL_MONO,
           advanced: [{
-            echoCancellation: audioProfile === 'call',
+            echoCancellation: audioProfile === PROFILE_CALL,
             autoGainControl: false,
-            noiseSuppression: audioProfile === 'call',
+            noiseSuppression: audioProfile === PROFILE_CALL,
             latency: 0,
           }]
         }
@@ -307,15 +329,15 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
       analyserRef.current = audioContextRef.current.createAnalyser();
 
       const workletNode = new AudioWorkletNode(audioContextRef.current, 'audio-processor', {
-        channelCount: channelMode === 'stereo' ? CHANNEL_STEREO : CHANNEL_MONO,
+        channelCount: channelMode === CHANNEL_MODE_STEREO ? CHANNEL_STEREO : CHANNEL_MONO,
         channelCountMode: 'explicit',
         processorOptions: {
-          isStereo: channelMode === 'stereo'
+          isStereo: channelMode === CHANNEL_MODE_STEREO
         }
       });
       processorRef.current = workletNode;
 
-      if (audioProfile === 'clean') {
+      if (audioProfile === PROFILE_CLEAN) {
         // Clean Voice DSP Chain
         const highPass = audioContextRef.current.createBiquadFilter();
         highPass.type = 'highpass';
@@ -359,16 +381,19 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
           return;
         }
 
-        // Pack into raw binary: [uint32: sampleRate][uint8: channelCount][PCM data]
+        // Pack into raw binary: [uint16: magic][uint32: sampleRate][uint8: channelCount][PCM data]
         const sampleRateVal = audioContextRef.current.sampleRate;
-        const channelCountVal = channelMode === 'stereo' ? CHANNEL_STEREO : CHANNEL_MONO;
-        
-        const packedBuffer = new ArrayBuffer(5 + processedBuffer.byteLength);
-        const headerView = new DataView(packedBuffer, 0, 5);
-        headerView.setUint32(0, sampleRateVal, true); // little endian
-        headerView.setUint8(4, channelCountVal);
+        const channelCountVal = channelMode === CHANNEL_MODE_STEREO ? CHANNEL_STEREO : CHANNEL_MONO;
+        const HEADER_BYTE_LENGTH = 7;
+        const PCM_MAGIC = 0xBC4D;
 
-        const pcmDestView = new Uint8Array(packedBuffer, 5);
+        const packedBuffer = new ArrayBuffer(HEADER_BYTE_LENGTH + processedBuffer.byteLength);
+        const headerView = new DataView(packedBuffer, 0, HEADER_BYTE_LENGTH);
+        headerView.setUint16(0, PCM_MAGIC, true);
+        headerView.setUint32(2, sampleRateVal, true);
+        headerView.setUint8(6, channelCountVal);
+
+        const pcmDestView = new Uint8Array(packedBuffer, HEADER_BYTE_LENGTH);
         pcmDestView.set(new Uint8Array(processedBuffer));
 
         socketRef.current.emit('pcm-chunk', packedBuffer, roomId);

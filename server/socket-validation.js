@@ -11,6 +11,8 @@ const MAX_GAIN = 2;
 const MONO_CHANNELS = 1;
 const STEREO_CHANNELS = 2;
 const PCM_BYTES_PER_SAMPLE = 2;
+const PCM_MAGIC = 0xBC4D;
+const HEADER_BYTE_LENGTH = 7;
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -43,24 +45,27 @@ function isValidChannelCount(channelCount) {
 }
 
 function normalizePcmChunk(chunk) {
-  // If the client sent raw binary Buffer/ArrayBuffer
-  const buffer = toBuffer(chunk);
-  if (!buffer) return null;
-  if (buffer.byteLength <= 5) return null;
-  if (buffer.byteLength > config.maxSocketPayloadBytes) return null;
+  const buf = toBuffer(chunk);
+  if (!buf) return null;
+  if (buf.byteLength <= HEADER_BYTE_LENGTH) return null;
+  if (buf.byteLength > config.maxSocketPayloadBytes) return null;
 
-  // Extract header: [uint32: sampleRate][uint8: channelCount]
-  const sampleRate = buffer.readUint32LE(0);
-  const channelCount = buffer.readUint8(4);
+  // Read header: [uint16: magic][uint32: sampleRate][uint8: channelCount]
+  const magic = buf.readUInt16LE(0);
+  const sampleRate = buf.readUInt32LE(2);
+  const channelCount = buf.readUInt8(6);
 
+  if (magic !== PCM_MAGIC) return null;
   if (!isValidSampleRate(sampleRate)) return null;
   if (!isValidChannelCount(channelCount)) return null;
 
-  // Extract PCM payload (from byte 5 onwards)
-  const pcmBuffer = buffer.subarray(5);
+  const pcmBuffer = buf.subarray(HEADER_BYTE_LENGTH);
 
   const frameSize = PCM_BYTES_PER_SAMPLE * channelCount;
-  if (pcmBuffer.byteLength % frameSize !== 0) return null;
+  if (pcmBuffer.byteLength % frameSize !== 0) {
+    console.warn(`[BMS] Dropping PCM chunk: payload alignment mismatch (${pcmBuffer.byteLength} bytes, frame=${frameSize})`);
+    return null;
+  }
 
   return {
     buffer: pcmBuffer,
@@ -93,4 +98,6 @@ module.exports = {
   isValidRoomId,
   isValidTimestamp,
   normalizePcmChunk,
+  PCM_MAGIC,
+  HEADER_BYTE_LENGTH,
 };

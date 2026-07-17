@@ -5,6 +5,8 @@ import {
   TELEMETRY_POLL_INTERVAL_MS,
   WATCHDOG_CHECK_INTERVAL_MS,
   SILENCE_THRESHOLD_MS,
+  ROLE_SENDER,
+  ROLE_RECEIVER,
 } from '../constants';
 
 export function useSocketConnection({
@@ -33,9 +35,11 @@ export function useSocketConnection({
   const bytesCountRef = useRef(0);
   const roleRef = useRef(role);
   const roomIdRef = useRef(roomId);
+  const inputGainRef = useRef(inputGain);
 
   useEffect(() => { roleRef.current = role; }, [role]);
   useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
+  useEffect(() => { inputGainRef.current = inputGain; }, [inputGain]);
 
   const getRemoteAckMessage = (cmd) => {
     if (cmd.type === 'gain') return `✅ Phone confirmed gain: ${Math.round(cmd.value * 100)}%`;
@@ -118,7 +122,7 @@ export function useSocketConnection({
     });
 
     // Remote control listener (only active on the phone sender)
-    if (role === 'sender') {
+    if (role === ROLE_SENDER) {
       socket.on('remote-control', (cmd) => {
         if (!isValidRemoteCommand(cmd)) return;
         const { type, value } = cmd;
@@ -134,7 +138,7 @@ export function useSocketConnection({
         if (type === 'mute') {
           setIsPhoneMuted(value);
           if (senderGainNodeRef.current) {
-            senderGainNodeRef.current.gain.value = value ? 0 : inputGain;
+            senderGainNodeRef.current.gain.value = value ? 0 : inputGainRef.current;
           }
           addLog(value ? '🔇 Remote Muted by PC' : '🔊 Remote Unmuted by PC');
           socket.emit('remote-control-ack', { type: 'mute', value }, roomIdRef.current);
@@ -143,7 +147,7 @@ export function useSocketConnection({
     }
 
     // ACK listener on PC receiver side — sync the slider value
-    if (role === 'receiver') {
+    if (role === ROLE_RECEIVER) {
       socket.on('remote-control-ack', (cmd) => {
         if (!isValidRemoteCommand(cmd)) return;
         if (cmd.type === 'gain') {
@@ -175,7 +179,7 @@ export function useSocketConnection({
   // Listen for pcm-chunks on receiver
   useEffect(() => {
     const socket = socketRef.current;
-    if (role !== 'receiver' || !socket) return;
+    if (role !== ROLE_RECEIVER || !socket) return;
 
     let isFirstChunk = true;
 
@@ -187,7 +191,7 @@ export function useSocketConnection({
       if (!pcmData) return;
       const { buffer, sampleRate, channelCount } = pcmData;
 
-      lastChunkTimeRef.current = Date.now();
+      lastChunkTimeRef.current = performance.now();
       bytesCountRef.current += buffer.byteLength;
 
       if (isFirstChunk) {
@@ -212,11 +216,11 @@ export function useSocketConnection({
 
   // Disconnection Watchdog (checks if chunks stop arriving)
   useEffect(() => {
-    if (role !== 'receiver') return;
+    if (role !== ROLE_RECEIVER) return;
 
     const watchdog = setInterval(() => {
       if (hasConnectedOnceRef.current && roleRef.current === 'receiver') {
-        const silenceDuration = Date.now() - lastChunkTimeRef.current;
+        const silenceDuration = performance.now() - lastChunkTimeRef.current;
         if (silenceDuration > SILENCE_THRESHOLD_MS) {
           if (!isSignalLost) {
             setIsSignalLost(true);

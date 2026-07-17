@@ -22,10 +22,11 @@ function interpolate(y1, y2, fraction) {
 class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
-    const targetBufferMs = options?.processorOptions?.targetBufferMs || DEFAULT_TARGET_BUFFER_MS;
+    this.sampleRate = sampleRate;
+    const targetBufferMs = options?.processorOptions?.targetBufferMs ?? DEFAULT_TARGET_BUFFER_MS;
     
-    this.targetBufferFrames = Math.round((sampleRate * targetBufferMs) / MS_PER_SECOND);
-    this.maxBufferFrames = Math.round((sampleRate * MAX_BUFFER_MS) / MS_PER_SECOND);
+    this.targetBufferFrames = Math.round((this.sampleRate * targetBufferMs) / MS_PER_SECOND);
+    this.maxBufferFrames = Math.round((this.sampleRate * MAX_BUFFER_MS) / MS_PER_SECOND);
     
     // Allocate a circular ring buffer that is twice the max latency size (allocation-free playback)
     this.ringBufferSize = this.maxBufferFrames * 2;
@@ -41,6 +42,11 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
       const message = event.data;
       if (message?.type === 'reset') {
         this.reset();
+        return;
+      }
+      if (message?.type === 'set-target-buffer') {
+        const ms = Math.min(message.targetBufferMs, MAX_BUFFER_MS);
+        this.targetBufferFrames = Math.round((this.sampleRate * ms) / MS_PER_SECOND);
         return;
       }
       if (message?.type !== 'pcm') return;

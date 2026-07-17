@@ -1,3 +1,4 @@
+const PCM_MAGIC = 0xBC4D;
 const MIN_SAMPLE_RATE = 8000;
 const MAX_SAMPLE_RATE = 96000;
 const MIN_GAIN = 0;
@@ -5,6 +6,7 @@ const MAX_GAIN = 2;
 const MONO_CHANNELS = 1;
 const STEREO_CHANNELS = 2;
 const PCM_BYTES_PER_SAMPLE = 2;
+const HEADER_BYTE_LENGTH = 7;
 const ROOM_ID_REGEX = /^[A-Z0-9]{3,12}$/;
 
 function isPlainObject(value) {
@@ -27,29 +29,32 @@ export function isValidRoomId(roomId) {
 }
 
 export function normalizePcmPayload(data) {
-  // If we receive the optimized binary packet (ArrayBuffer or ArrayBuffer view)
   const isBinary = data instanceof ArrayBuffer || ArrayBuffer.isView(data);
   if (!isBinary) return null;
 
   const rawBuffer = data instanceof ArrayBuffer ? data : data.buffer;
   const byteOffset = data instanceof ArrayBuffer ? 0 : data.byteOffset;
-  const byteLength = data instanceof ArrayBuffer ? data.byteLength : data.byteLength;
+  const byteLength = data.byteLength;
 
-  if (byteLength <= 5) return null;
+  if (byteLength <= HEADER_BYTE_LENGTH) return null;
 
-  // Read header: [uint32: sampleRate][uint8: channelCount]
-  const view = new DataView(rawBuffer, byteOffset, 5);
-  const sampleRate = view.getUint32(0, true); // little endian
-  const channelCount = view.getUint8(4);
+  // Read header: [uint16: magic][uint32: sampleRate][uint8: channelCount]
+  const view = new DataView(rawBuffer, byteOffset, HEADER_BYTE_LENGTH);
+  const magic = view.getUint16(0, true);
+  const sampleRate = view.getUint32(2, true);
+  const channelCount = view.getUint8(6);
 
+  if (magic !== PCM_MAGIC) return null;
   if (!isValidSampleRate(sampleRate)) return null;
   if (!isValidChannelCount(channelCount)) return null;
 
-  // Extract raw PCM payload (from byte 5 onwards)
-  const pcmBuffer = rawBuffer.slice(byteOffset + 5, byteOffset + byteLength);
+  const pcmBuffer = rawBuffer.slice(byteOffset + HEADER_BYTE_LENGTH, byteOffset + byteLength);
 
   const frameSize = PCM_BYTES_PER_SAMPLE * channelCount;
-  if (pcmBuffer.byteLength % frameSize !== 0) return null;
+  if (pcmBuffer.byteLength % frameSize !== 0) {
+    console.warn(`[BMS] Dropping PCM chunk: payload alignment mismatch (${pcmBuffer.byteLength} bytes, frame=${frameSize})`);
+    return null;
+  }
 
   return {
     buffer: pcmBuffer,

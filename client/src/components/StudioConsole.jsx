@@ -8,6 +8,7 @@ import SenderControls from './SenderControls';
 import StatusPanel from './StatusPanel';
 import TelemetryStrip from './TelemetryStrip';
 import VisualizerPanel from './VisualizerPanel';
+import { ROLE_SENDER, ROLE_RECEIVER } from '../constants';
 
 export default function StudioConsole({
   role,
@@ -49,8 +50,8 @@ export default function StudioConsole({
   onStopAudioRecording,
   onDisconnect,
 }) {
-  const isSender = role === 'sender';
-  const isReceiver = role === 'receiver';
+  const isSender = role === ROLE_SENDER;
+  const isReceiver = role === ROLE_RECEIVER;
 
   return (
     <div className="console-panel text-center">

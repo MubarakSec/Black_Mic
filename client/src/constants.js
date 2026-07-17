@@ -15,6 +15,19 @@ export const CHANNEL_MONO = 1;
 export const CHANNEL_STEREO = 2;
 export const ROOM_ID_VALIDATOR_REGEX = /^[A-Z0-9]{3,12}$/;
 
+// Role constants
+export const ROLE_SENDER = 'sender';
+export const ROLE_RECEIVER = 'receiver';
+
+// Channel mode strings
+export const CHANNEL_MODE_MONO = 'mono';
+export const CHANNEL_MODE_STEREO = 'stereo';
+
+// Audio profile constants
+export const PROFILE_RAW = 'raw';
+export const PROFILE_CLEAN = 'clean';
+export const PROFILE_CALL = 'call';
+
 // Telemetry & Watchdog Configuration
 export const TELEMETRY_POLL_INTERVAL_MS = 1000;
 export const WATCHDOG_CHECK_INTERVAL_MS = 1000;

@@ -14,6 +14,13 @@ import {
   LS_AUDIO_PROFILE,
   LS_RECEIVER_BUFFER_MS,
   DEFAULT_RECEIVER_BUFFER_MS,
+  ROLE_SENDER,
+  ROLE_RECEIVER,
+  CHANNEL_MODE_MONO,
+  CHANNEL_MODE_STEREO,
+  PROFILE_RAW,
+  PROFILE_CLEAN,
+  PROFILE_CALL,
 } from './constants';
 import './index.css';
 import './components.css';
@@ -21,9 +28,12 @@ import './components.css';
 function App() {
   const [role, setRole] = useState(null);
   const [roomId, setRoomId] = useState(() => localStorage.getItem(LS_ROOM_ID) || DEFAULT_ROOM_ID);
-  const [channelMode, setChannelMode] = useState(() => localStorage.getItem(LS_CHANNEL_MODE) || 'mono');
-  const [audioProfile, setAudioProfile] = useState(() => localStorage.getItem(LS_AUDIO_PROFILE) || 'clean');
-  const [jitterBufferMs, setJitterBufferMs] = useState(() => parseInt(localStorage.getItem(LS_RECEIVER_BUFFER_MS) || DEFAULT_RECEIVER_BUFFER_MS.toString(), 10));
+  const [channelMode, setChannelMode] = useState(() => localStorage.getItem(LS_CHANNEL_MODE) || CHANNEL_MODE_MONO);
+  const [audioProfile, setAudioProfile] = useState(() => localStorage.getItem(LS_AUDIO_PROFILE) || PROFILE_CLEAN);
+  const [jitterBufferMs, setJitterBufferMs] = useState(() => {
+    const stored = parseInt(localStorage.getItem(LS_RECEIVER_BUFFER_MS), 10);
+    return Number.isFinite(stored) ? stored : DEFAULT_RECEIVER_BUFFER_MS;
+  });
   const [logs, setLogs] = useState([]);
   const [status, setStatus] = useState('Waiting to connect...');
 
@@ -115,7 +125,7 @@ function App() {
   const audioContextRefSynced = useRef(false);
   useEffect(() => {
     // Dynamic binding to restart sender if channel mode or profile changes
-    if (role === 'sender' && audioContextRefSynced.current) {
+    if (role === ROLE_SENDER && audioContextRefSynced.current) {
       addLog(`🔄 Settings changed. Restarting mic stream...`);
       cleanupAudio();
       startSender();
@@ -150,6 +160,7 @@ function App() {
 
   const handleRemoteGainChange = (e) => {
     const val = parseFloat(e.target.value);
+    if (!Number.isFinite(val)) return;
     setRemotePhoneGain(val);
     if (socketRef.current) {
       socketRef.current.emit('remote-control', { type: 'gain', value: val }, roomId);
@@ -174,13 +185,13 @@ function App() {
 
   const onStartSender = () => {
     if (!validateRoomBeforeStart()) return;
-    setRole('sender');
+    setRole(ROLE_SENDER);
     startSender();
   };
 
   const onStartReceiver = () => {
     if (!validateRoomBeforeStart()) return;
-    setRole('receiver');
+    setRole(ROLE_RECEIVER);
     startReceiver();
   };
 
@@ -199,8 +210,8 @@ function App() {
 
   return (
     <div className="container">
-      {isAudioLocked && <AudioLockOverlay onUnlock={unlockAudio} />}
       {isSignalLost && <SignalLostOverlay />}
+      {isAudioLocked && !isSignalLost && <AudioLockOverlay onUnlock={unlockAudio} />}
       <StudioConsole
         role={role}
         roomId={roomId}

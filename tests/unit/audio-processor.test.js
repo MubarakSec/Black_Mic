@@ -40,13 +40,18 @@ function createProcessor() {
   return new ProcessorClass({ processorOptions: { isStereo: false } });
 }
 
+const BATCH_FRAMES = 512;
+const CALLS_TO_FILL_BATCH = BATCH_FRAMES / QUANTUM_FRAMES;
+
 function processMonoSample(processor, sample) {
   const input = [new Float32Array(QUANTUM_FRAMES).fill(sample)];
 
-  processor.process([input], [], {});
+  for (let i = 0; i < CALLS_TO_FILL_BATCH; i++) {
+    processor.process([input], [], {});
+  }
 
-  const [buffer] = processor.port.postMessage.mock.calls.at(-1);
-  return new Int16Array(buffer);
+  const lastCallArgs = processor.port.postMessage.mock.calls.at(-1);
+  return new Int16Array(lastCallArgs[0].buffer);
 }
 
 describe('AudioProcessor PCM encoding', () => {

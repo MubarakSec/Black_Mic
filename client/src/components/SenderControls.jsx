@@ -1,16 +1,17 @@
 import React from 'react';
+import { PROFILE_RAW, PROFILE_CLEAN, PROFILE_CALL, CHANNEL_MODE_MONO, CHANNEL_MODE_STEREO } from '../constants';
 
 const PROFILE_LABELS = {
-  raw:   'RAW — No browser DSP, no Android filters',
-  clean: 'CLEAN — 80 Hz HPF + Compressor (Web Audio)',
-  call:  'CALL — Android EC + NS (for open speakers)',
+  [PROFILE_RAW]:   'RAW — No browser DSP, no Android filters',
+  [PROFILE_CLEAN]: 'CLEAN — 80 Hz HPF + Compressor (Web Audio)',
+  [PROFILE_CALL]:  'CALL — Android EC + NS (for open speakers)',
 };
 
 // What each profile REQUESTS from Android
 const PROFILE_WANTS = {
-  raw:   { noiseSuppression: false, echoCancellation: false },
-  clean: { noiseSuppression: false, echoCancellation: false },
-  call:  { noiseSuppression: true,  echoCancellation: true  },
+  [PROFILE_RAW]:   { noiseSuppression: false, echoCancellation: false },
+  [PROFILE_CLEAN]: { noiseSuppression: false, echoCancellation: false },
+  [PROFILE_CALL]:  { noiseSuppression: true,  echoCancellation: true  },
 };
 
 function ProfileCheck({ label, requested, actual }) {
@@ -59,22 +60,22 @@ export default function SenderControls({
         <span>Audio Profile</span>
         <div className="segmented-control" style={{ flex: '2', display: 'flex', gap: '0' }}>
           <button
-            className={`btn-control ${audioProfile === 'raw' ? 'is-sender-active' : ''}`}
-            onClick={() => setAudioProfile('raw')}
+            className={`btn-control ${audioProfile === PROFILE_RAW ? 'is-sender-active' : ''}`}
+            onClick={() => setAudioProfile(PROFILE_RAW)}
             style={{ flex: '1', padding: '0.4rem 0' }}
           >
             RAW
           </button>
           <button
-            className={`btn-control ${audioProfile === 'clean' ? 'is-sender-active' : ''}`}
-            onClick={() => setAudioProfile('clean')}
+            className={`btn-control ${audioProfile === PROFILE_CLEAN ? 'is-sender-active' : ''}`}
+            onClick={() => setAudioProfile(PROFILE_CLEAN)}
             style={{ flex: '1', padding: '0.4rem 0' }}
           >
             CLEAN
           </button>
           <button
-            className={`btn-control ${audioProfile === 'call' ? 'is-sender-active' : ''}`}
-            onClick={() => setAudioProfile('call')}
+            className={`btn-control ${audioProfile === PROFILE_CALL ? 'is-sender-active' : ''}`}
+            onClick={() => setAudioProfile(PROFILE_CALL)}
             style={{ flex: '1', padding: '0.4rem 0' }}
           >
             CALL
@@ -90,14 +91,14 @@ export default function SenderControls({
         <span>Channel Mode</span>
         <div className="segmented-control">
           <button
-            className={`btn-control ${channelMode === 'mono' ? 'is-sender-active' : ''}`}
-            onClick={() => setChannelMode('mono')}
+            className={`btn-control ${channelMode === CHANNEL_MODE_MONO ? 'is-sender-active' : ''}`}
+            onClick={() => setChannelMode(CHANNEL_MODE_MONO)}
           >
             MONO
           </button>
           <button
-            className={`btn-control ${channelMode === 'stereo' ? 'is-receiver-active' : ''}`}
-            onClick={() => setChannelMode('stereo')}
+            className={`btn-control ${channelMode === CHANNEL_MODE_STEREO ? 'is-receiver-active' : ''}`}
+            onClick={() => setChannelMode(CHANNEL_MODE_STEREO)}
           >
             STEREO
           </button>

@@ -60,7 +60,9 @@ async function initRoom(roomId) {
     ]);
 
     if (codeSource !== 0) {
-      console.warn(`[BMS] Failed to create remap source. The monitor will still work, but won't be named 'Black Mic'.`);
+      console.warn(`[BMS] Failed to create remap source. Rolling back null-sink module.`);
+      await spawnPactl(['unload-module', sinkModuleId]);
+      return { ok: false, message: `Failed to create remap source for room ${roomId}.` };
     }
 
     sessions[roomId] = { 
@@ -123,6 +125,7 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
       }
     });
     audioBridge.stdin.on('drain', () => {
+      if (s.audioBridge !== audioBridge) return;
       s.isDraining = false;
     });
     audioBridge.on('close', () => {
@@ -132,15 +135,9 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
     console.log(`[BMS] pacat audio bridge: ${sampleRate}Hz mono -> ${s.sinkName}`);
   }
 
-  // The client now sends raw buffer, we just pass it straight through (no upmixing)
-  // We guarantee aligned offset by copying to a new buffer
-  const alignedBuffer = new ArrayBuffer(pcmBuffer.byteLength);
-  new Uint8Array(alignedBuffer).set(pcmBuffer);
-  const passThroughBuffer = Buffer.from(alignedBuffer);
-
   // Aggregate chunks into ~10ms blocks to prevent pipe starvation pops
-  s.pcmBufferQueue.push(passThroughBuffer);
-  s.pcmBufferBytes += passThroughBuffer.length;
+  s.pcmBufferQueue.push(pcmBuffer);
+  s.pcmBufferBytes += pcmBuffer.length;
 
   if (s.pcmBufferBytes >= PCM_FLUSH_THRESHOLD_BYTES) {
     const chunk = Buffer.concat(s.pcmBufferQueue);
