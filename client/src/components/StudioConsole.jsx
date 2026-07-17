@@ -43,9 +43,14 @@ export default function StudioConsole({
   recordingSeconds,
   recordings,
   logs,
+  isCalibrating,
+  noiseFloorDb,
+  noiseReductionActive,
   onRemoteGainChange,
   onToggleRemoteMute,
   onToggleMonitoring,
+  onCalibrateNoise,
+  onToggleNoiseReduction,
   onStartAudioRecording,
   onStopAudioRecording,
   onDisconnect,
@@ -76,6 +81,11 @@ export default function StudioConsole({
           audioProfile={audioProfile}
           setAudioProfile={setAudioProfile}
           micSettings={micSettings}
+          isCalibrating={isCalibrating}
+          noiseFloorDb={noiseFloorDb}
+          noiseReductionActive={noiseReductionActive}
+          onCalibrateNoise={onCalibrateNoise}
+          onToggleNoiseReduction={onToggleNoiseReduction}
         />
       )}
 

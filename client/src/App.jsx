@@ -69,6 +69,9 @@ function App() {
     isSignalLost,
     setIsSignalLost,
     micSettings,
+    isCalibrating,
+    noiseFloorDb,
+    noiseReductionActive,
     destRef,
     lastChunkTimeRef,
     hasConnectedOnceRef,
@@ -245,9 +248,14 @@ function App() {
         recordingSeconds={recordingSeconds}
         recordings={recordings}
         logs={logs}
+        isCalibrating={isCalibrating}
+        noiseFloorDb={noiseFloorDb}
+        noiseReductionActive={noiseReductionActive}
         onRemoteGainChange={handleRemoteGainChange}
         onToggleRemoteMute={toggleRemoteMute}
         onToggleMonitoring={toggleMonitoring}
+        onCalibrateNoise={startNoiseCalibration}
+        onToggleNoiseReduction={toggleNoiseReduction}
         onStartAudioRecording={startAudioOnlyRecording}
         onStopAudioRecording={stopAudioOnlyRecording}
         onDisconnect={handleDisconnect}

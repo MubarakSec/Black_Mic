@@ -26,6 +26,7 @@ export const CHANNEL_MODE_STEREO = 'stereo';
 // Audio profile constants
 export const PROFILE_RAW = 'raw';
 export const PROFILE_CLEAN = 'clean';
+export const PROFILE_FAN = 'fan';
 export const PROFILE_CALL = 'call';
 
 // Telemetry & Watchdog Configuration
@@ -49,3 +50,10 @@ export const UNLOCK_NOTE_2_HZ = 659.25; // E5 Note
 // Visualizer Configuration
 export const FFT_SIZE = 256;
 export const GLOW_VOLUME_THRESHOLD = 30;
+
+// Noise reduction
+export const LS_NOISE_REDUCTION = 'bms_noiseReduction';
+export const CALIBRATION_DURATION_MS = 3000;
+export const CALIBRATION_SAMPLE_INTERVAL_MS = 100;
+export const NOISE_GATE_RATIO_ATTACK = 4;  // RMS ratio above floor → full passthrough
+export const NOISE_GATE_MAX_ATTENUATION = 0.2; // -14dB max reduction (≈80%)
