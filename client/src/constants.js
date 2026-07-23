@@ -49,8 +49,9 @@ export const UNLOCK_NOTE_1_HZ = 523.25; // C5 Note
 export const UNLOCK_NOTE_2_HZ = 659.25; // E5 Note
 
 // Visualizer Configuration
-export const FFT_SIZE = 256;
+export const FFT_SIZE = 128;
 export const GLOW_VOLUME_THRESHOLD = 30;
+export const VISUALIZER_FPS = 20;
 
 // Noise reduction
 export const LS_NOISE_REDUCTION = 'bms_noiseReduction';

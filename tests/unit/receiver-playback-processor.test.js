@@ -8,6 +8,7 @@ const TEST_BUFFER_MS = 1;
 const QUANTUM_FRAMES = 128;
 const PCM_POSITIVE_HALF = 16384;
 const PCM_NEGATIVE_HALF = -16384;
+const PCM_QUARTER = 8192;
 
 function loadProcessorClass() {
   let ProcessorClass = null;
@@ -94,6 +95,49 @@ describe('ReceiverPlaybackProcessor', () => {
     expect(renderFirstFrame(processor)).toEqual({
       left: 0.5,
       right: -0.5,
+    });
+  });
+
+  it('preserves frame order on the direct 48kHz path', () => {
+    const processor = createProcessor();
+    const pcm = new Int16Array(QUANTUM_FRAMES);
+    pcm[0] = PCM_QUARTER;
+    pcm[1] = PCM_POSITIVE_HALF;
+
+    processor.port.onmessage({
+      data: {
+        type: 'pcm',
+        buffer: pcm.buffer,
+        sampleRate: TEST_SAMPLE_RATE,
+        channelCount: 1,
+      },
+    });
+
+    const left = new Float32Array(QUANTUM_FRAMES);
+    const right = new Float32Array(QUANTUM_FRAMES);
+    processor.process([], [[left, right]]);
+
+    expect(Array.from(left.slice(0, 2))).toEqual([0.25, 0.5]);
+    expect(Array.from(right.slice(0, 2))).toEqual([0.25, 0.5]);
+  });
+
+  it('still resamples PCM when the sender sample rate differs', () => {
+    const processor = createProcessor();
+    const inputSampleRate = TEST_SAMPLE_RATE / 2;
+    const pcm = new Int16Array(QUANTUM_FRAMES / 2).fill(PCM_POSITIVE_HALF);
+
+    processor.port.onmessage({
+      data: {
+        type: 'pcm',
+        buffer: pcm.buffer,
+        sampleRate: inputSampleRate,
+        channelCount: 1,
+      },
+    });
+
+    expect(renderFirstFrame(processor)).toEqual({
+      left: 0.5,
+      right: 0.5,
     });
   });
 });

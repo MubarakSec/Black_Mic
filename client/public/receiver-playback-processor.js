@@ -83,6 +83,22 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
         this.readIndex = (this.readIndex + overflow) % this.ringBufferSize;
       }
 
+      if (inputSampleRate === this.sampleRate) {
+        const isStereo = channelCount === STEREO_CHANNELS;
+        for (let frame = 0; frame < inputFrames; frame++) {
+          const inputOffset = frame * channelCount;
+          const leftSample = pcm[inputOffset] / PCM_SAMPLE_SCALE;
+          const rightSample = isStereo
+            ? pcm[inputOffset + 1] / PCM_SAMPLE_SCALE
+            : leftSample;
+          this.ringBufferL[this.writeIndex] = leftSample;
+          this.ringBufferR[this.writeIndex] = rightSample;
+          this.writeIndex += 1;
+          if (this.writeIndex === this.ringBufferSize) this.writeIndex = 0;
+        }
+        return;
+      }
+
       const ratio = inputFrames / outputFrames;
 
       for (let i = 0; i < outputFrames; i++) {
@@ -106,12 +122,11 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
           ? interpolate(rightSample1, rightSample2, fraction)
           : leftSample;
 
-        const idx = (this.writeIndex + i) % this.ringBufferSize;
-        this.ringBufferL[idx] = clampSample(leftSample);
-        this.ringBufferR[idx] = clampSample(rightSample);
+        this.ringBufferL[this.writeIndex] = clampSample(leftSample);
+        this.ringBufferR[this.writeIndex] = clampSample(rightSample);
+        this.writeIndex += 1;
+        if (this.writeIndex === this.ringBufferSize) this.writeIndex = 0;
       }
-
-      this.writeIndex = (this.writeIndex + outputFrames) % this.ringBufferSize;
     } catch (e) {
       console.error('[BMS Worklet] Error during enqueuePcm ring buffer write:', e.message);
     }
@@ -143,18 +158,20 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
     let hitUnderrun = false;
 
     // Pull samples directly from the pre-allocated circular ring buffer
+    let availableFrames = currentBuffered;
     for (let frame = 0; frame < leftOutput.length; frame++) {
-      const available = this.getBufferedFrames();
-      if (available === 0) {
-        leftOutput[frame] = 0;
-        rightOutput[frame] = 0;
+      if (availableFrames === 0) {
+        leftOutput.fill(0, frame);
+        rightOutput.fill(0, frame);
         hitUnderrun = true;
-        continue;
+        break;
       }
 
       leftOutput[frame] = this.ringBufferL[this.readIndex];
       rightOutput[frame] = this.ringBufferR[this.readIndex];
-      this.readIndex = (this.readIndex + 1) % this.ringBufferSize;
+      this.readIndex += 1;
+      if (this.readIndex === this.ringBufferSize) this.readIndex = 0;
+      availableFrames -= 1;
     }
 
     if (hitUnderrun) {

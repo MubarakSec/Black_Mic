@@ -18,6 +18,8 @@ import {
   UNLOCK_NOTE_1_HZ,
   UNLOCK_NOTE_2_HZ,
   FFT_SIZE,
+  GLOW_VOLUME_THRESHOLD,
+  VISUALIZER_FPS,
   ROLE_SENDER,
   ROLE_RECEIVER,
   CHANNEL_MODE_STEREO,
@@ -27,6 +29,20 @@ import {
   PROFILE_CALL,
 } from '../constants';
 import { getAudioSetupError } from '../utils/getAudioSetupError';
+
+const MILLISECONDS_PER_SECOND = 1000;
+const VISUALIZER_FRAME_INTERVAL_MS = MILLISECONDS_PER_SECOND / VISUALIZER_FPS;
+const VISUALIZER_DB_FLOOR = -36;
+const VISUALIZER_ORB_BASE_SCALE = 1;
+const VISUALIZER_ORB_SCALE_RANGE = 1.3;
+const VISUALIZER_ORB_BASE_OPACITY = 0.3;
+const VISUALIZER_ORB_OPACITY_RANGE = 0.5;
+const VISUALIZER_CANVAS_ACTIVE_THRESHOLD = 5;
+const VISUALIZER_BAR_GAP_PX = 2;
+const VISUALIZER_CLIP_COLOR = '#ff4d4d';
+const VISUALIZER_IDLE_COLOR = '#fff';
+const VISUALIZER_SENDER_COLOR = '#00f58c';
+const VISUALIZER_RECEIVER_COLOR = '#00d2ff';
 
 export function useAudioEngine({ role, channelMode, audioProfile, addLog, setStatus, socketRef, roomId, jitterBufferMs }) {
   const MAX_INPUT_GAIN = 2.0;
@@ -226,11 +242,30 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
   const startVisualizerLoop = (activeRole = role) => {
     if (!analyserRef.current) return;
     analyserRef.current.fftSize = FFT_SIZE;
+    analyserRef.current.smoothingTimeConstant = 0.8;
     const bufferLength = analyserRef.current.frequencyBinCount;
     const dataArray = new Uint8Array(bufferLength);
+    const canvas = canvasRef.current;
+    const canvasContext = canvas?.getContext('2d');
+    const activeColor = activeRole === ROLE_SENDER
+      ? VISUALIZER_SENDER_COLOR
+      : VISUALIZER_RECEIVER_COLOR;
+    const visualState = {
+      iconColor: null,
+      barColor: null,
+      label: null,
+      labelColor: null,
+      canvasOpacity: null,
+    };
+    let lastFrameTime = -VISUALIZER_FRAME_INTERVAL_MS;
 
-    const updateVisualizer = () => {
+    const updateVisualizer = (frameTime) => {
       if (!analyserRef.current) return;
+      animationRef.current = requestAnimationFrame(updateVisualizer);
+      if (document.visibilityState !== 'visible') return;
+      if (frameTime - lastFrameTime < VISUALIZER_FRAME_INTERVAL_MS) return;
+      lastFrameTime = frameTime;
+
       analyserRef.current.getByteFrequencyData(dataArray);
 
       let sum = 0;
@@ -242,72 +277,110 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
       // Direct DOM manipulation of the UI elements for high performance
       if (activeRole === ROLE_SENDER && telemetryRef.current.peakDb !== -100) {
         const t = telemetryRef.current;
-        const peakPct = Math.max(0, Math.min(100, (t.peakDb + 36) / 36 * 100));
+        const peakPct = Math.max(
+          0,
+          Math.min(100, ((t.peakDb - VISUALIZER_DB_FLOOR) / -VISUALIZER_DB_FLOOR) * 100),
+        );
+        const normalizedPeak = peakPct / 100;
+        const isClipped = t.clippedSamples > 0;
+        const levelColor = isClipped ? VISUALIZER_CLIP_COLOR : activeColor;
         
         if (orbRef.current) {
-          orbRef.current.style.transform = `scale(${1 + (peakPct / 100) * 1.3})`;
-          orbRef.current.style.opacity = `${0.3 + (peakPct / 100) * 0.5}`;
+          orbRef.current.style.transform = `scale(${VISUALIZER_ORB_BASE_SCALE + (normalizedPeak * VISUALIZER_ORB_SCALE_RANGE)})`;
+          orbRef.current.style.opacity = `${VISUALIZER_ORB_BASE_OPACITY + (normalizedPeak * VISUALIZER_ORB_OPACITY_RANGE)}`;
         }
         if (iconRef.current) {
-          iconRef.current.style.color = t.clippedSamples > 0 ? '#ff4d4d' : 'var(--accent-1)';
+          if (visualState.iconColor !== levelColor) {
+            iconRef.current.style.color = levelColor;
+            visualState.iconColor = levelColor;
+          }
         }
         if (vuBarRef.current) {
-          vuBarRef.current.style.width = `${peakPct}%`;
-          vuBarRef.current.style.backgroundColor = t.clippedSamples > 0 ? '#ff4d4d' : 'var(--accent-1)';
+          vuBarRef.current.style.transform = `scaleX(${normalizedPeak})`;
+          if (visualState.barColor !== levelColor) {
+            vuBarRef.current.style.backgroundColor = levelColor;
+            visualState.barColor = levelColor;
+          }
         }
         if (vuLabelRef.current) {
-          vuLabelRef.current.textContent = `${t.peakDb.toFixed(1)} dB`;
-          vuLabelRef.current.style.color = t.clippedSamples > 0 ? '#ff4d4d' : '#fff';
+          const label = `${t.peakDb.toFixed(1)} dB`;
+          if (visualState.label !== label) {
+            vuLabelRef.current.textContent = label;
+            visualState.label = label;
+          }
+          const labelColor = isClipped ? VISUALIZER_CLIP_COLOR : VISUALIZER_IDLE_COLOR;
+          if (visualState.labelColor !== labelColor) {
+            vuLabelRef.current.style.color = labelColor;
+            visualState.labelColor = labelColor;
+          }
         }
       } else {
         const volumePct = Math.round((average / 255) * 100);
+        const normalizedVolume = volumePct / 100;
+        const iconColor = average > GLOW_VOLUME_THRESHOLD
+          ? activeColor
+          : VISUALIZER_IDLE_COLOR;
         
         if (orbRef.current) {
-          orbRef.current.style.transform = `scale(${1 + (average / 255) * 1.3})`;
-          orbRef.current.style.opacity = `${0.3 + (average / 255) * 0.5}`;
+          orbRef.current.style.transform = `scale(${VISUALIZER_ORB_BASE_SCALE + (normalizedVolume * VISUALIZER_ORB_SCALE_RANGE)})`;
+          orbRef.current.style.opacity = `${VISUALIZER_ORB_BASE_OPACITY + (normalizedVolume * VISUALIZER_ORB_OPACITY_RANGE)}`;
         }
         if (iconRef.current) {
-          iconRef.current.style.color = average > 30 ? (activeRole === ROLE_SENDER ? 'var(--accent-1)' : 'var(--accent-2)') : '#fff';
+          if (visualState.iconColor !== iconColor) {
+            iconRef.current.style.color = iconColor;
+            visualState.iconColor = iconColor;
+          }
         }
         if (vuBarRef.current) {
-          vuBarRef.current.style.width = `${volumePct}%`;
-          vuBarRef.current.style.backgroundColor = activeRole === ROLE_SENDER ? 'var(--accent-1)' : 'var(--accent-2)';
+          vuBarRef.current.style.transform = `scaleX(${normalizedVolume})`;
+          if (visualState.barColor !== activeColor) {
+            vuBarRef.current.style.backgroundColor = activeColor;
+            visualState.barColor = activeColor;
+          }
         }
         if (vuLabelRef.current) {
-          vuLabelRef.current.textContent = `${volumePct}%`;
-          vuLabelRef.current.style.color = '#fff';
+          const label = `${volumePct}%`;
+          if (visualState.label !== label) {
+            vuLabelRef.current.textContent = label;
+            visualState.label = label;
+          }
+          if (visualState.labelColor !== VISUALIZER_IDLE_COLOR) {
+            vuLabelRef.current.style.color = VISUALIZER_IDLE_COLOR;
+            visualState.labelColor = VISUALIZER_IDLE_COLOR;
+          }
         }
       }
 
       // Draw real-time frequency visualizer on canvas
-      const canvas = canvasRef.current;
-      if (canvas) {
-        const ctx = canvas.getContext('2d');
+      if (canvas && canvasContext) {
         if (canvasDimsRef.current.width === 0) {
           canvasDimsRef.current.width = canvas.width;
           canvasDimsRef.current.height = canvas.height;
         }
         const { width, height } = canvasDimsRef.current;
-        ctx.clearRect(0, 0, width, height);
+        canvasContext.clearRect(0, 0, width, height);
 
         const barWidth = (width / bufferLength) * 1.6;
-        let barHeight;
+        const drawableBarWidth = Math.max(1, barWidth - VISUALIZER_BAR_GAP_PX);
         let x = 0;
 
+        canvasContext.beginPath();
         for (let i = 0; i < bufferLength; i++) {
-          barHeight = (dataArray[i] / 255) * height;
-        const activeColor = activeRole === ROLE_SENDER ? '#00f58c' : '#00d2ff';
-          ctx.fillStyle = activeColor;
-          ctx.fillRect(x, height - barHeight, barWidth - 2, barHeight);
+          const barHeight = (dataArray[i] / 255) * height;
+          canvasContext.rect(x, height - barHeight, drawableBarWidth, barHeight);
           x += barWidth;
         }
+        canvasContext.fillStyle = activeColor;
+        canvasContext.fill();
 
-        canvas.style.opacity = average > 5 ? '1' : '0.2';
+        const canvasOpacity = average > VISUALIZER_CANVAS_ACTIVE_THRESHOLD ? '1' : '0.2';
+        if (visualState.canvasOpacity !== canvasOpacity) {
+          canvas.style.opacity = canvasOpacity;
+          visualState.canvasOpacity = canvasOpacity;
+        }
       }
-
-      animationRef.current = requestAnimationFrame(updateVisualizer);
     };
-    updateVisualizer();
+    animationRef.current = requestAnimationFrame(updateVisualizer);
   };
 
   const startSender = async () => {

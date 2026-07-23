@@ -62,7 +62,7 @@ export default function VisualizerPanel({ role, canvasRef, orbRef, iconRef, vuBa
             ref={vuBarRef}
             className="vu-meter-bar" 
             style={{ 
-              width: '0%',
+              transform: 'scaleX(0)',
               background: isSender ? 'var(--accent-1)' : 'var(--accent-2)',
               boxShadow: isSender ? '0 0 8px var(--accent-1)' : '0 0 8px var(--accent-2)'
             }}
