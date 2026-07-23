@@ -7,10 +7,23 @@ function getStatusIcon(status) {
   return <Activity color="var(--warning-color)" size={16} />;
 }
 
-export default function StatusPanel({ status, role, isPhoneMuted, roomState, operatorIssue }) {
+function getVirtualMicLabel(virtualMicState) {
+  if (!virtualMicState) return 'System mic: Preparing';
+  if (virtualMicState.ready) return 'System mic: Ready';
+  return 'System mic: Unavailable';
+}
+
+export default function StatusPanel({
+  status,
+  role,
+  isPhoneMuted,
+  roomState,
+  operatorIssue,
+  virtualMicState,
+}) {
   return (
     <div className="status-stack">
-      <div className="status-badge">
+      <div className="status-badge" role="status" aria-live="polite">
         {getStatusIcon(status)}
         <span>{status}</span>
       </div>
@@ -19,11 +32,16 @@ export default function StatusPanel({ status, role, isPhoneMuted, roomState, ope
         <div className="room-state-strip">
           <span>Phone: {roomState.senders}</span>
           <span>PC: {roomState.receivers}</span>
+          {role === 'receiver' && (
+            <span className={virtualMicState?.ready ? 'system-mic-ready' : ''}>
+              {getVirtualMicLabel(virtualMicState)}
+            </span>
+          )}
         </div>
       )}
 
       {operatorIssue && (
-        <div className="status-badge status-warning">
+        <div className="status-badge status-warning" role="alert">
           <AlertTriangle size={16} /> {operatorIssue}
         </div>
       )}

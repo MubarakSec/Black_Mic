@@ -19,6 +19,7 @@ export default function ReceiverControls({
   isMonitoring,
   isAudioRecording,
   recordingSeconds,
+  isPhoneConnected,
   onRemoteGainChange,
   onToggleRemoteMute,
   onToggleMonitoring,
@@ -29,10 +30,11 @@ export default function ReceiverControls({
     <>
       <div className="slider-container">
         <div className="slider-label">
-          <span>USB Jitter Buffer (Latency)</span>
+          <label htmlFor="receiver-jitter-buffer">Jitter Buffer (Latency)</label>
           <span className="value-receiver">{jitterBufferMs}ms</span>
         </div>
         <input
+          id="receiver-jitter-buffer"
           type="range"
           min="10"
           max="150"
@@ -45,10 +47,11 @@ export default function ReceiverControls({
 
       <div className="slider-container">
         <div className="slider-label">
-          <span>Speaker Output Volume</span>
+          <label htmlFor="receiver-output-volume">Speaker Output Volume</label>
           <span className="value-receiver">{Math.round(outputVolume * 100)}%</span>
         </div>
         <input
+          id="receiver-output-volume"
           type="range"
           min="0"
           max="2"
@@ -63,17 +66,26 @@ export default function ReceiverControls({
         isPhoneMuted={isPhoneMuted}
         remotePhoneGain={remotePhoneGain}
         remoteAckMsg={remoteAckMsg}
+        isPhoneConnected={isPhoneConnected}
         onGainChange={onRemoteGainChange}
         onToggleMute={onToggleRemoteMute}
       />
 
       <div className="control-row">
-        <button className={`btn-control ${isMonitoring ? 'is-receiver-active' : ''}`} onClick={onToggleMonitoring}>
+        <button
+          className={`btn-control ${isMonitoring ? 'is-receiver-active' : ''}`}
+          onClick={onToggleMonitoring}
+          disabled={!isPhoneConnected}
+        >
           {isMonitoring ? 'Feedback Active' : 'Enable Live Feedback'}
         </button>
 
         {!isAudioRecording ? (
-          <button className="btn-control is-sender-soft" onClick={onStartAudioRecording}>
+          <button
+            className="btn-control is-sender-soft"
+            onClick={onStartAudioRecording}
+            disabled={!isPhoneConnected}
+          >
             <Mic size={16} /> Record Audio Only
           </button>
         ) : (
@@ -90,6 +102,12 @@ export default function ReceiverControls({
             REC {formatTime(recordingSeconds)}
           </span>
         </div>
+      )}
+
+      {!isPhoneConnected && (
+        <p className="control-hint" role="status">
+          Phone controls and recording will unlock when audio connects.
+        </p>
       )}
     </>
   );

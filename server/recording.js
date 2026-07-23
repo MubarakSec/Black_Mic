@@ -2,11 +2,16 @@
 
 const { spawn } = require('child_process');
 const { downmixStereoToMonoBuffer } = require('./pcm-utils');
+const { routeEasyEffects } = require('./easyeffects-router');
 
 const DEFAULT_SAMPLE_RATE = 48000;
 const MONO_CHANNEL_COUNT = 1;
 const MONO_CHANNEL_MAP = 'mono';
-const PCM_FLUSH_THRESHOLD_BYTES = 1920; // ~20ms at 48kHz mono 16-bit (2 worklet packets)
+const PCM_BYTES_PER_SAMPLE = 2;
+const AUDIO_WORKLET_BATCH_FRAMES = 512;
+const PCM_FLUSH_THRESHOLD_BYTES = AUDIO_WORKLET_BATCH_FRAMES * PCM_BYTES_PER_SAMPLE;
+const DEFAULT_EASYEFFECTS_ROOM_ID = 'ROOM';
+const EASYEFFECTS_ROOM_ID = process.env.BMS_EASYEFFECTS_ROOM || DEFAULT_EASYEFFECTS_ROOM_ID;
 
 /**
  * Per-room session state.
@@ -14,6 +19,18 @@ const PCM_FLUSH_THRESHOLD_BYTES = 1920; // ~20ms at 48kHz mono 16-bit (2 worklet
  */
 const sessions = {};
 const initializingRooms = new Map();
+const cleaningRooms = new Map();
+const roomGenerations = new Map();
+
+function getRoomGeneration(roomId) {
+  return roomGenerations.get(roomId) || 0;
+}
+
+function advanceRoomGeneration(roomId) {
+  const nextGeneration = getRoomGeneration(roomId) + 1;
+  roomGenerations.set(roomId, nextGeneration);
+  return nextGeneration;
+}
 
 // ---------------------------------------------------------------------------
 // Virtual PipeWire sink helpers
@@ -30,14 +47,21 @@ function spawnPactl(args) {
 }
 
 async function initRoom(roomId) {
+  const pendingCleanup = cleaningRooms.get(roomId);
+  if (pendingCleanup) await pendingCleanup;
   if (sessions[roomId]) return { ok: true };
-  
-  if (initializingRooms.has(roomId)) {
-    return initializingRooms.get(roomId);
+
+  const existingInitialization = initializingRooms.get(roomId);
+  if (existingInitialization) {
+    const existingResult = await existingInitialization;
+    if (!existingResult.cancelled) return existingResult;
+    return initRoom(roomId);
   }
 
+  const generation = getRoomGeneration(roomId);
   const initPromise = (async () => {
     const sinkName = `BMS_${roomId}_Sink`;
+    const sourceName = `BlackMic_${roomId}`;
     const { code: codeSink, out: sinkModuleId } = await spawnPactl([
       'load-module', 'module-null-sink',
       `sink_name=${sinkName}`,
@@ -54,7 +78,7 @@ async function initRoom(roomId) {
 
     const { code: codeSource, out: sourceModuleId } = await spawnPactl([
       'load-module', 'module-remap-source',
-      `source_name=BlackMic_${roomId}`,
+      `source_name=${sourceName}`,
       `master=${sinkName}.monitor`,
       `source_properties=device.description="Black Mic"`
     ]);
@@ -63,6 +87,16 @@ async function initRoom(roomId) {
       console.warn(`[BMS] Failed to create remap source. Rolling back null-sink module.`);
       await spawnPactl(['unload-module', sinkModuleId]);
       return { ok: false, message: `Failed to create remap source for room ${roomId}.` };
+    }
+
+    if (generation !== getRoomGeneration(roomId)) {
+      await spawnPactl(['unload-module', sourceModuleId]);
+      await spawnPactl(['unload-module', sinkModuleId]);
+      return {
+        ok: false,
+        cancelled: true,
+        message: `Receiver left room ${roomId} before virtual microphone setup completed.`,
+      };
     }
 
     sessions[roomId] = { 
@@ -76,14 +110,21 @@ async function initRoom(roomId) {
       pcmBufferBytes: 0,
       isDraining: false
     };
+    if (roomId === EASYEFFECTS_ROOM_ID) {
+      const routed = await routeEasyEffects(sourceName);
+      const routeStatus = routed ? 'connected' : 'not available';
+      console.log(`[BMS] EasyEffects route ${routeStatus}: ${sourceName}`);
+    }
     console.log(`[BMS] Virtual mic ready: Black Mic (modules ${sinkModuleId}, ${sourceModuleId || 'none'})`);
     return { ok: true };
   })();
 
-  initializingRooms.set(roomId, initPromise);
-  const result = await initPromise;
-  initializingRooms.delete(roomId);
-  return result;
+  const trackedPromise = initPromise.finally(() => {
+    if (initializingRooms.get(roomId) !== trackedPromise) return;
+    initializingRooms.delete(roomId);
+  });
+  initializingRooms.set(roomId, trackedPromise);
+  return trackedPromise;
 }
 
 function resetBridgeState(session, bridge) {
@@ -146,7 +187,7 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
   // Downmix stereo to mono for the PipeWire sink (always mono)
   const monoBuffer = channelCount === 2 ? downmixStereoToMonoBuffer(pcmBuffer) : pcmBuffer;
 
-  // Aggregate chunks into ~10ms blocks to prevent pipe starvation pops
+  // Write one complete AudioWorklet packet at a time to minimize bridge latency.
   s.pcmBufferQueue.push(monoBuffer);
   s.pcmBufferBytes += monoBuffer.length;
 
@@ -182,21 +223,28 @@ function stopProcess(childProcess) {
   childProcess.kill('SIGTERM');
 }
 
-function cleanupRoom(roomId) {
+async function cleanupRoom(roomId) {
+  advanceRoomGeneration(roomId);
+  const pendingCleanup = cleaningRooms.get(roomId);
+  if (pendingCleanup) return pendingCleanup;
+
   const s = sessions[roomId];
   if (!s) return;
 
+  delete sessions[roomId];
   stopProcess(s.audioBridge);
 
-  if (s.sourceModuleId) {
-    spawn('pactl', ['unload-module', s.sourceModuleId]).on('error', () => {});
-  }
-  if (s.sinkModuleId) {
-    spawn('pactl', ['unload-module', s.sinkModuleId]).on('error', () => {});
+  const cleanupPromise = (async () => {
+    if (s.sourceModuleId) await spawnPactl(['unload-module', s.sourceModuleId]);
+    if (s.sinkModuleId) await spawnPactl(['unload-module', s.sinkModuleId]);
     console.log(`[BMS] Virtual mic unloaded (modules ${s.sinkModuleId}, ${s.sourceModuleId || 'none'})`);
-  }
-
-  delete sessions[roomId];
+  })();
+  const trackedCleanup = cleanupPromise.finally(() => {
+    if (cleaningRooms.get(roomId) !== trackedCleanup) return;
+    cleaningRooms.delete(roomId);
+  });
+  cleaningRooms.set(roomId, trackedCleanup);
+  return trackedCleanup;
 }
 
 module.exports = { initRoom, feedAudio, cleanupRoom };

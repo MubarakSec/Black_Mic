@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { isValidRoomId, isValidRemoteCommand, normalizePcmPayload } from '../../client/src/utils/socketValidation';
+import {
+  isValidRoomId,
+  isValidRemoteCommand,
+  normalizeJoinResponse,
+  normalizePcmPayload,
+  normalizeRoomState,
+  normalizeVirtualMicState,
+} from '../../client/src/utils/socketValidation';
 import { normalizePcmChunk } from '../../server/socket-validation';
 
 const PCM_MAGIC = 0xBC4D;
@@ -46,6 +53,55 @@ describe('Remote Command Validation', () => {
     expect(isValidRemoteCommand({ type: 'gain', value: 2.0 })).toBe(true);
     expect(isValidRemoteCommand({ type: 'gain', value: 2.5 })).toBe(false); // Too high
     expect(isValidRemoteCommand({ type: 'gain', value: -0.5 })).toBe(false); // Negative
+  });
+});
+
+describe('Server State Validation', () => {
+  it('should normalize valid join acknowledgements', () => {
+    expect(normalizeJoinResponse({ ok: true })).toEqual({ ok: true });
+    expect(normalizeJoinResponse({
+      ok: false,
+      code: 'ROLE_TAKEN',
+      message: 'A phone is already connected.',
+    })).toEqual({
+      ok: false,
+      code: 'ROLE_TAKEN',
+      message: 'A phone is already connected.',
+    });
+  });
+
+  it('should reject malformed join acknowledgements', () => {
+    expect(normalizeJoinResponse({ ok: 'yes' })).toBe(null);
+    expect(normalizeJoinResponse({ ok: false, code: 'ROLE_TAKEN' })).toBe(null);
+  });
+
+  it('should accept only the expected single-user room shape', () => {
+    expect(normalizeRoomState({ roomId: 'ROOM', senders: 1, receivers: 1 }, 'ROOM')).toEqual({
+      senders: 1,
+      receivers: 1,
+    });
+    expect(normalizeRoomState({ roomId: 'OTHER', senders: 1, receivers: 1 }, 'ROOM')).toBe(null);
+    expect(normalizeRoomState({ roomId: 'ROOM', senders: 2, receivers: 1 }, 'ROOM')).toBe(null);
+  });
+
+  it('should validate virtual microphone readiness', () => {
+    expect(normalizeVirtualMicState({
+      roomId: 'ROOM',
+      ready: true,
+      sourceName: 'BlackMic_ROOM',
+    }, 'ROOM')).toEqual({
+      ready: true,
+      sourceName: 'BlackMic_ROOM',
+    });
+    expect(normalizeVirtualMicState({
+      roomId: 'ROOM',
+      ready: false,
+      message: 'PipeWire is unavailable.',
+    }, 'ROOM')).toEqual({
+      ready: false,
+      message: 'PipeWire is unavailable.',
+    });
+    expect(normalizeVirtualMicState({ roomId: 'ROOM', ready: true }, 'ROOM')).toBe(null);
   });
 });
 

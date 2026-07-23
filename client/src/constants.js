@@ -33,6 +33,7 @@ export const PROFILE_CALL = 'call';
 export const TELEMETRY_POLL_INTERVAL_MS = 1000;
 export const WATCHDOG_CHECK_INTERVAL_MS = 1000;
 export const SILENCE_THRESHOLD_MS = 2500;
+export const JOIN_TIMEOUT_MS = 5000;
 
 // Audio Hardware Constraints
 export const MICROPHONE_SAMPLE_RATE = 48000;

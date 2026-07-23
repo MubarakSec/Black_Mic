@@ -1,4 +1,5 @@
 import { PROFILE_RAW, PROFILE_CLEAN, PROFILE_FAN, PROFILE_CALL, CHANNEL_MODE_MONO, CHANNEL_MODE_STEREO } from '../constants';
+import BlackoutControl from './BlackoutControl';
 import FanNoiseControls from './FanNoiseControls';
 
 const PROFILE_LABELS = {
@@ -50,10 +51,11 @@ export default function SenderControls({
     <>
       <div className="slider-container">
         <div className="slider-label">
-          <span>Microphone Input Gain</span>
+          <label htmlFor="microphone-input-gain">Microphone Input Gain</label>
           <span className="value-sender">{(inputGain * 100).toFixed(0)}% ({inputGain.toFixed(2)}×)</span>
         </div>
         <input
+          id="microphone-input-gain"
           type="range"
           min="0"
           max="2"
@@ -70,6 +72,7 @@ export default function SenderControls({
           <button
             className={`btn-control ${audioProfile === PROFILE_RAW ? 'is-sender-active' : ''}`}
             onClick={() => setAudioProfile(PROFILE_RAW)}
+            aria-pressed={audioProfile === PROFILE_RAW}
             style={{ flex: '1', padding: '0.4rem 0' }}
           >
             RAW
@@ -77,6 +80,7 @@ export default function SenderControls({
           <button
             className={`btn-control ${audioProfile === PROFILE_CLEAN ? 'is-sender-active' : ''}`}
             onClick={() => setAudioProfile(PROFILE_CLEAN)}
+            aria-pressed={audioProfile === PROFILE_CLEAN}
             style={{ flex: '1', padding: '0.4rem 0' }}
           >
             CLEAN
@@ -84,6 +88,7 @@ export default function SenderControls({
           <button
             className={`btn-control ${audioProfile === PROFILE_FAN ? 'is-sender-active' : ''}`}
             onClick={() => setAudioProfile(PROFILE_FAN)}
+            aria-pressed={audioProfile === PROFILE_FAN}
             style={{ flex: '1', padding: '0.4rem 0' }}
           >
             FAN
@@ -91,6 +96,7 @@ export default function SenderControls({
           <button
             className={`btn-control ${audioProfile === PROFILE_CALL ? 'is-sender-active' : ''}`}
             onClick={() => setAudioProfile(PROFILE_CALL)}
+            aria-pressed={audioProfile === PROFILE_CALL}
             style={{ flex: '1', padding: '0.4rem 0' }}
           >
             CALL
@@ -108,17 +114,21 @@ export default function SenderControls({
           <button
             className={`btn-control ${channelMode === CHANNEL_MODE_MONO ? 'is-sender-active' : ''}`}
             onClick={() => setChannelMode(CHANNEL_MODE_MONO)}
+            aria-pressed={channelMode === CHANNEL_MODE_MONO}
           >
             MONO
           </button>
           <button
             className={`btn-control ${channelMode === CHANNEL_MODE_STEREO ? 'is-receiver-active' : ''}`}
             onClick={() => setChannelMode(CHANNEL_MODE_STEREO)}
+            aria-pressed={channelMode === CHANNEL_MODE_STEREO}
           >
             STEREO
           </button>
         </div>
       </div>
+
+      <BlackoutControl />
 
       {micSettings && (
         <div style={{

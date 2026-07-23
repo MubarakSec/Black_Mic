@@ -8,6 +8,9 @@ const STEREO_CHANNELS = 2;
 const PCM_BYTES_PER_SAMPLE = 2;
 const HEADER_BYTE_LENGTH = 7;
 const ROOM_ID_REGEX = /^[A-Z0-9]{3,12}$/;
+const MAX_SERVER_MESSAGE_LENGTH = 240;
+const MAX_SERVER_CODE_LENGTH = 40;
+const MAX_SOURCE_NAME_LENGTH = 64;
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -26,6 +29,46 @@ function isValidChannelCount(channelCount) {
 
 export function isValidRoomId(roomId) {
   return typeof roomId === 'string' && ROOM_ID_REGEX.test(roomId);
+}
+
+export function normalizeJoinResponse(payload) {
+  if (!isPlainObject(payload)) return null;
+  if (payload.ok === true) return { ok: true };
+  if (payload.ok !== false) return null;
+  if (typeof payload.code !== 'string' || payload.code.length === 0) return null;
+  if (payload.code.length > MAX_SERVER_CODE_LENGTH) return null;
+  if (typeof payload.message !== 'string' || payload.message.length === 0) return null;
+  if (payload.message.length > MAX_SERVER_MESSAGE_LENGTH) return null;
+  return {
+    ok: false,
+    code: payload.code,
+    message: payload.message,
+  };
+}
+
+export function normalizeRoomState(payload, roomId) {
+  if (!isPlainObject(payload)) return null;
+  if (payload.roomId !== roomId) return null;
+  if (!Number.isInteger(payload.senders) || payload.senders < 0 || payload.senders > 1) return null;
+  if (!Number.isInteger(payload.receivers) || payload.receivers < 0 || payload.receivers > 1) return null;
+  return {
+    senders: payload.senders,
+    receivers: payload.receivers,
+  };
+}
+
+export function normalizeVirtualMicState(payload, roomId) {
+  if (!isPlainObject(payload)) return null;
+  if (payload.roomId !== roomId) return null;
+  if (typeof payload.ready !== 'boolean') return null;
+  if (payload.ready) {
+    if (typeof payload.sourceName !== 'string' || payload.sourceName.length === 0) return null;
+    if (payload.sourceName.length > MAX_SOURCE_NAME_LENGTH) return null;
+    return { ready: true, sourceName: payload.sourceName };
+  }
+  if (typeof payload.message !== 'string' || payload.message.length === 0) return null;
+  if (payload.message.length > MAX_SERVER_MESSAGE_LENGTH) return null;
+  return { ready: false, message: payload.message };
 }
 
 export function normalizePcmPayload(data) {

@@ -8,6 +8,7 @@ const cors = require('cors');
 const path = require('path');
 const fs = require('fs');
 const config = require('./server/config');
+const { createRoomRegistry } = require('./server/room-registry');
 
 process.on('unhandledRejection', (reason) => {
   console.error('[BMS] Unhandled Rejection:', reason);
@@ -24,6 +25,8 @@ const {
 } = require('./server/socket-validation');
 
 const app = express();
+const INVALID_ROOM_CODE = 'INVALID_ROOM';
+const INVALID_ROLE_CODE = 'INVALID_ROLE';
 app.use(cors({ origin: config.corsOrigin }));
 app.use(express.static(path.join(__dirname, 'client/dist')));
 
@@ -42,24 +45,10 @@ const io = new Server(server, {
   transports: ['websocket'],
 });
 
-// Track which socket is in which room (for cleanup on disconnect)
-const socketRooms = {};
-
-function hasRoomMembers(roomId) {
-  return Object.values(socketRooms).some(entry => entry.roomId === roomId);
-}
-
-function getRoomState(roomId) {
-  return Object.values(socketRooms).reduce((state, entry) => {
-    if (entry.roomId !== roomId) return state;
-    if (entry.role === 'sender') return { ...state, senders: state.senders + 1 };
-    if (entry.role === 'receiver') return { ...state, receivers: state.receivers + 1 };
-    return state;
-  }, { roomId, senders: 0, receivers: 0 });
-}
+const roomRegistry = createRoomRegistry();
 
 function emitRoomState(roomId) {
-  io.to(roomId).emit('room-state', getRoomState(roomId));
+  io.to(roomId).emit('room-state', roomRegistry.getRoomState(roomId));
 }
 
 function warnSocket(socket, message) {
@@ -67,12 +56,12 @@ function warnSocket(socket, message) {
 }
 
 function cleanupRoomIfEmpty(roomId) {
-  if (hasRoomMembers(roomId)) return;
+  if (roomRegistry.hasRoomMembers(roomId)) return;
   recording.cleanupRoom(roomId);
 }
 
 function getSocketRoom(socket) {
-  return socketRooms[socket.id] || null;
+  return roomRegistry.get(socket.id);
 }
 
 function isSocketInRoom(socket, roomId) {
@@ -82,37 +71,81 @@ function isSocketInRoom(socket, roomId) {
 }
 
 function leaveCurrentRoom(socket) {
-  const room = getSocketRoom(socket);
+  const room = roomRegistry.leave(socket.id);
   if (!room) return;
   socket.leave(room.roomId);
-  delete socketRooms[socket.id];
   emitRoomState(room.roomId);
   cleanupRoomIfEmpty(room.roomId);
+}
+
+function respondToJoin(acknowledge, payload) {
+  if (typeof acknowledge !== 'function') return;
+  acknowledge(payload);
 }
 
 io.on('connection', (socket) => {
   console.log('Client connected:', socket.id);
 
-  socket.on('join-room', (roomId, role) => {
+  socket.on('join-room', (roomId, role, acknowledge) => {
     if (!isValidRoomId(roomId)) {
       console.warn(`Blocked invalid join-room: "${roomId}" from ${socket.id}`);
+      respondToJoin(acknowledge, {
+        ok: false,
+        code: INVALID_ROOM_CODE,
+        message: 'Room ID must use 3-12 uppercase letters or numbers.',
+      });
       return;
     }
     if (!isValidRole(role)) {
       console.warn(`Blocked invalid join-room role: "${role}" from ${socket.id}`);
+      respondToJoin(acknowledge, {
+        ok: false,
+        code: INVALID_ROLE_CODE,
+        message: 'Choose either the phone or PC receiver role.',
+      });
       return;
     }
-    leaveCurrentRoom(socket);
+
+    const joinResult = roomRegistry.join(socket.id, roomId, role);
+    if (!joinResult.ok) {
+      warnSocket(socket, joinResult.message);
+      respondToJoin(acknowledge, joinResult);
+      return;
+    }
+
+    const previousRoom = joinResult.previous;
+    if (previousRoom && previousRoom.roomId !== roomId) {
+      socket.leave(previousRoom.roomId);
+      emitRoomState(previousRoom.roomId);
+      cleanupRoomIfEmpty(previousRoom.roomId);
+    }
+
     socket.join(roomId);
-    socketRooms[socket.id] = { roomId, role };
     console.log(`[${role || 'unknown'}] ${socket.id} joined room: ${roomId}`);
+    respondToJoin(acknowledge, { ok: true });
 
     // Create virtual PipeWire sink when any client joins
     if (role === 'receiver') {
       recording.initRoom(roomId).then(initResult => {
-        if (!initResult.ok) warnSocket(socket, initResult.message);
+        if (!initResult.ok) {
+          warnSocket(socket, initResult.message);
+          socket.emit('virtual-mic-state', {
+            roomId,
+            ready: false,
+            message: initResult.message,
+          });
+          return;
+        }
+        socket.emit('virtual-mic-state', {
+          roomId,
+          ready: true,
+          sourceName: `BlackMic_${roomId}`,
+        });
       }).catch(err => {
         console.error(`[BMS] initRoom failed for ${roomId}:`, err);
+        const message = `Virtual microphone setup failed for room ${roomId}.`;
+        warnSocket(socket, message);
+        socket.emit('virtual-mic-state', { roomId, ready: false, message });
       });
     }
     emitRoomState(roomId);

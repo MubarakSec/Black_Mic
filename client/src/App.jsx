@@ -17,7 +17,7 @@ import {
   ROLE_SENDER,
   ROLE_RECEIVER,
   CHANNEL_MODE_MONO,
-  PROFILE_CLEAN,
+  PROFILE_RAW,
 } from './constants';
 import './index.css';
 import './components.css';
@@ -26,13 +26,15 @@ function App() {
   const [role, setRole] = useState(null);
   const [roomId, setRoomId] = useState(() => localStorage.getItem(LS_ROOM_ID) || DEFAULT_ROOM_ID);
   const [channelMode, setChannelMode] = useState(() => localStorage.getItem(LS_CHANNEL_MODE) || CHANNEL_MODE_MONO);
-  const [audioProfile, setAudioProfile] = useState(() => localStorage.getItem(LS_AUDIO_PROFILE) || PROFILE_CLEAN);
+  const [audioProfile, setAudioProfile] = useState(() => localStorage.getItem(LS_AUDIO_PROFILE) || PROFILE_RAW);
   const [jitterBufferMs, setJitterBufferMs] = useState(() => {
     const stored = parseInt(localStorage.getItem(LS_RECEIVER_BUFFER_MS), 10);
     return Number.isFinite(stored) ? stored : DEFAULT_RECEIVER_BUFFER_MS;
   });
   const [logs, setLogs] = useState([]);
   const [status, setStatus] = useState('Waiting to connect...');
+  const [startingRole, setStartingRole] = useState(null);
+  const [startError, setStartError] = useState(null);
 
   const [remotePhoneGain, setRemotePhoneGain] = useState(1.0);
   const [isPhoneMuted, setIsPhoneMuted] = useState(false);
@@ -104,6 +106,9 @@ function App() {
     roomState,
     latency,
     bitrate,
+    joinError,
+    virtualMicState,
+    clearJoinError,
   } = useSocketConnection({
     role,
     roomId,
@@ -122,6 +127,7 @@ function App() {
     hasConnectedOnceRef,
     isSignalLost,
     setIsSignalLost,
+    isSenderAudioReady: Boolean(micSettings),
   });
 
   // Share the actual socketRef from useSocketConnection with useAudioEngine
@@ -141,11 +147,22 @@ function App() {
   const {
     isAudioRecording, recordings, recordingSeconds,
     startAudioOnlyRecording, stopAudioOnlyRecording,
+    finalizeRecordingForDisconnect,
     clearRecordings,
   } = useRecording({ destRef, addLog });
 
+  useEffect(() => {
+    if (!joinError || !role) return;
+    finalizeRecordingForDisconnect();
+    cleanupAudio();
+    socketRef.current?.emit('leave-room');
+    setRole(null);
+    setStartError(joinError);
+  }, [cleanupAudio, finalizeRecordingForDisconnect, joinError, role]);
+
   const handleDisconnect = () => {
     addLog('🔌 Disconnecting from studio room...');
+    finalizeRecordingForDisconnect();
     cleanupAudio();
     if (socketRef.current) {
       socketRef.current.emit('leave-room', roomId);
@@ -159,6 +176,8 @@ function App() {
     setIsAudioLocked(false);
     setIsSignalLost(false);
     hasConnectedOnceRef.current = false;
+    setStartError(null);
+    clearJoinError();
   };
 
   const handleRemoteGainChange = (e) => {
@@ -186,16 +205,36 @@ function App() {
     return false;
   };
 
-  const onStartSender = () => {
-    if (!validateRoomBeforeStart()) return;
-    setRole(ROLE_SENDER);
-    startSender();
+  const prepareStart = (nextRole) => {
+    if (!validateRoomBeforeStart()) return false;
+    setStartingRole(nextRole);
+    setStartError(null);
+    clearJoinError();
+    setIsSignalLost(false);
+    hasConnectedOnceRef.current = false;
+    return true;
   };
 
-  const onStartReceiver = () => {
-    if (!validateRoomBeforeStart()) return;
+  const onStartSender = async () => {
+    if (!prepareStart(ROLE_SENDER)) return;
+    const result = await startSender();
+    setStartingRole(null);
+    if (!result?.ok) {
+      setStartError(result?.message || 'The phone microphone could not start.');
+      return;
+    }
+    setRole(ROLE_SENDER);
+  };
+
+  const onStartReceiver = async () => {
+    if (!prepareStart(ROLE_RECEIVER)) return;
+    const result = await startReceiver();
+    setStartingRole(null);
+    if (!result?.ok) {
+      setStartError(result?.message || 'The PC receiver could not start.');
+      return;
+    }
     setRole(ROLE_RECEIVER);
-    startReceiver();
   };
 
   if (!role) {
@@ -206,6 +245,8 @@ function App() {
           setRoomId={setRoomId} 
           onStartSender={onStartSender} 
           onStartReceiver={onStartReceiver} 
+          startingRole={startingRole}
+          startError={startError}
         />
       </div>
     );
@@ -220,7 +261,9 @@ function App() {
         roomId={roomId}
         status={status}
         roomState={roomState}
+        isPhoneConnected={Boolean(roomState?.senders)}
         operatorIssue={operatorIssue}
+        virtualMicState={virtualMicState}
         isPhoneMuted={isPhoneMuted}
         latency={latency}
         bitrate={bitrate}

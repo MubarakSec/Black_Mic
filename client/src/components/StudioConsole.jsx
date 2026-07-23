@@ -15,7 +15,9 @@ export default function StudioConsole({
   roomId,
   status,
   roomState,
+  isPhoneConnected,
   operatorIssue,
+  virtualMicState,
   isPhoneMuted,
   latency,
   bitrate,
@@ -62,7 +64,14 @@ export default function StudioConsole({
   return (
     <div className="console-panel text-center">
       <ConsoleHeader role={role} roomId={roomId} />
-      <StatusPanel status={status} role={role} isPhoneMuted={isPhoneMuted} roomState={roomState} operatorIssue={operatorIssue} />
+      <StatusPanel
+        status={status}
+        role={role}
+        isPhoneMuted={isPhoneMuted}
+        roomState={roomState}
+        operatorIssue={operatorIssue}
+        virtualMicState={virtualMicState}
+      />
       <TelemetryStrip latency={latency} bitrate={bitrate} underruns={underruns} />
       <VisualizerPanel 
         role={role} 
@@ -103,6 +112,7 @@ export default function StudioConsole({
           isMonitoring={isMonitoring}
           isAudioRecording={isAudioRecording}
           recordingSeconds={recordingSeconds}
+          isPhoneConnected={isPhoneConnected}
           onRemoteGainChange={onRemoteGainChange}
           onToggleRemoteMute={onToggleRemoteMute}
           onToggleMonitoring={onToggleMonitoring}

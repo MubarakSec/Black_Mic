@@ -26,6 +26,7 @@ import {
   PROFILE_FAN,
   PROFILE_CALL,
 } from '../constants';
+import { getAudioSetupError } from '../utils/getAudioSetupError';
 
 export function useAudioEngine({ role, channelMode, audioProfile, addLog, setStatus, socketRef, roomId, jitterBufferMs }) {
   const MAX_INPUT_GAIN = 2.0;
@@ -134,41 +135,40 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
     return () => clearInterval(alarmInterval);
   }, [isSignalLost, role]);
 
-  const requestWakeLock = useCallback(async () => {
-    if ('wakeLock' in navigator) {
-      try {
-        wakeLockRef.current = await navigator.wakeLock.request('screen');
-        addLog('💡 Wake Lock active! Screen will stay awake.');
-      } catch (err) {
-        addLog(`⚠️ Wake Lock failed: ${err.message}`);
-      }
-    } else {
-      addLog('⚠️ Wake Lock API not supported on this browser.');
+  const releaseWakeLock = useCallback(async () => {
+    if (!wakeLockRef.current) return;
+    try {
+      await wakeLockRef.current.release();
+      wakeLockRef.current = null;
+      addLog('💡 Wake Lock released.');
+    } catch (err) {
+      console.error(err);
     }
   }, [addLog]);
 
-  // Visibility change to request/release wake lock
+  const requestWakeLock = useCallback(async () => {
+    if (!('wakeLock' in navigator)) {
+      addLog('⚠️ Wake Lock API not supported on this browser.');
+      return;
+    }
+    try {
+      wakeLockRef.current = await navigator.wakeLock.request('screen');
+      addLog('💡 Wake Lock active! Screen will stay awake.');
+    } catch (err) {
+      addLog(`⚠️ Wake Lock failed: ${err.message}`);
+    }
+  }, [addLog]);
+
+  // Reacquire the wake lock when the sender becomes visible again.
   useEffect(() => {
     const handleVisibility = async () => {
-      if (role === ROLE_SENDER && document.visibilityState === 'visible' && !wakeLockRef.current) {
-        await requestWakeLock();
-      }
+      if (role !== ROLE_SENDER || document.visibilityState !== 'visible') return;
+      if (wakeLockRef.current) return;
+      await requestWakeLock();
     };
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [role, requestWakeLock]);
-
-  const releaseWakeLock = async () => {
-    if (wakeLockRef.current) {
-      try {
-        await wakeLockRef.current.release();
-        wakeLockRef.current = null;
-        addLog('💡 Wake Lock released.');
-      } catch (err) {
-        console.error(err);
-      }
-    }
-  };
 
   const playAlarmBeep = () => {
     if (!audioContextRef.current) return;
@@ -223,7 +223,7 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
     await audioContextRef.current.resume();
   };
 
-  const startVisualizerLoop = () => {
+  const startVisualizerLoop = (activeRole = role) => {
     if (!analyserRef.current) return;
     analyserRef.current.fftSize = FFT_SIZE;
     const bufferLength = analyserRef.current.frequencyBinCount;
@@ -240,7 +240,7 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
       const average = sum / bufferLength;
 
       // Direct DOM manipulation of the UI elements for high performance
-      if (role === ROLE_SENDER && telemetryRef.current.peakDb !== -100) {
+      if (activeRole === ROLE_SENDER && telemetryRef.current.peakDb !== -100) {
         const t = telemetryRef.current;
         const peakPct = Math.max(0, Math.min(100, (t.peakDb + 36) / 36 * 100));
         
@@ -267,11 +267,11 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
           orbRef.current.style.opacity = `${0.3 + (average / 255) * 0.5}`;
         }
         if (iconRef.current) {
-          iconRef.current.style.color = average > 30 ? (role === ROLE_SENDER ? 'var(--accent-1)' : 'var(--accent-2)') : '#fff';
+          iconRef.current.style.color = average > 30 ? (activeRole === ROLE_SENDER ? 'var(--accent-1)' : 'var(--accent-2)') : '#fff';
         }
         if (vuBarRef.current) {
           vuBarRef.current.style.width = `${volumePct}%`;
-          vuBarRef.current.style.backgroundColor = role === ROLE_SENDER ? 'var(--accent-1)' : 'var(--accent-2)';
+          vuBarRef.current.style.backgroundColor = activeRole === ROLE_SENDER ? 'var(--accent-1)' : 'var(--accent-2)';
         }
         if (vuLabelRef.current) {
           vuLabelRef.current.textContent = `${volumePct}%`;
@@ -296,7 +296,7 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
 
         for (let i = 0; i < bufferLength; i++) {
           barHeight = (dataArray[i] / 255) * height;
-          const activeColor = role === ROLE_SENDER ? '#00f58c' : '#00d2ff';
+        const activeColor = activeRole === ROLE_SENDER ? '#00f58c' : '#00d2ff';
           ctx.fillStyle = activeColor;
           ctx.fillRect(x, height - barHeight, barWidth - 2, barHeight);
           x += barWidth;
@@ -466,12 +466,16 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
         workletNode.port.postMessage(processedBuffer, [processedBuffer]);
       };
 
-      startVisualizerLoop();
+      startVisualizerLoop(ROLE_SENDER);
       setStatus('Broadcasting lossless audio! 🔴');
       addLog('🚀 Native Int16 audio stream active over TCP socket!');
+      return { ok: true };
     } catch (e) {
-      addLog(`❌ Mic Error: ${e.message}`);
-      setStatus('Microphone access denied or unavailable.');
+      const message = getAudioSetupError(e);
+      cleanupAudio();
+      addLog(`❌ Mic Error: ${message}`);
+      setStatus(message);
+      return { ok: false, message };
     }
   };
 
@@ -513,10 +517,14 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
         setIsAudioLocked(true);
       }
 
-      startVisualizerLoop();
+      startVisualizerLoop(ROLE_RECEIVER);
+      return { ok: true };
     } catch (e) {
+      const message = 'Receiver audio could not start. Reload the page or try another browser.';
+      cleanupAudio();
       addLog(`❌ Receiver audio failed: ${e.message}`);
-      setStatus('Receiver audio engine failed to start.');
+      setStatus(message);
+      return { ok: false, message };
     }
   };
 
@@ -546,6 +554,7 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
       animationRef.current = null;
     }
     hasSentFirstChunkRef.current = false;
+    setMicSettings(null);
     if (audioContextRef.current) {
       audioContextRef.current.close().catch(() => {});
       audioContextRef.current = null;

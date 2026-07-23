@@ -108,6 +108,12 @@
   padding: 0.25rem 0.45rem;
 }
 
+.room-state-strip .system-mic-ready {
+  color: var(--success-color);
+  border-color: rgba(0, 245, 140, 0.25);
+  background: rgba(0, 245, 140, 0.06);
+}
+
 .btn-control.is-sender-active,
 .btn-control.is-sender-soft {
   background: rgba(0, 245, 140, 0.08);
@@ -171,6 +177,66 @@
 
 .channel-mode-row > span {
   font-size: 0.85rem;
+}
+
+.blackout-control {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin: 0 1rem 1.5rem;
+  padding: 0.85rem 1rem;
+  border: 1px solid var(--panel-border);
+  border-radius: 8px;
+  background: rgba(0, 245, 140, 0.025);
+  text-align: left;
+}
+
+.blackout-control > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.blackout-control strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+}
+
+.blackout-control span {
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.blackout-control .btn-control {
+  min-width: 3.5rem;
+  flex: 0 0 auto;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+}
+
+.blackout-screen {
+  position: fixed;
+  inset: 0;
+  z-index: var(--z-blackout);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  width: 100%;
+  padding: 2rem;
+  border: 0;
+  background: #000;
+  color: #56605b;
+  font: 500 0.72rem 'JetBrains Mono', monospace;
+  cursor: pointer;
+}
+
+.blackout-screen span {
+  opacity: 0.7;
 }
 
 .segmented-control {
@@ -277,5 +343,15 @@
   .channel-mode-row {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .blackout-control {
+    align-items: stretch;
+    flex-direction: column;
+    margin-inline: 0;
+  }
+
+  .blackout-control .btn-control {
+    width: 100%;
   }
 }

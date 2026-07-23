@@ -1,13 +1,33 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
-import { isValidRemoteCommand, normalizePcmPayload } from '../utils/socketValidation';
 import {
+  isValidRemoteCommand,
+  normalizeJoinResponse,
+  normalizePcmPayload,
+  normalizeRoomState,
+  normalizeVirtualMicState,
+} from '../utils/socketValidation';
+import {
+  JOIN_TIMEOUT_MS,
   TELEMETRY_POLL_INTERVAL_MS,
   WATCHDOG_CHECK_INTERVAL_MS,
   SILENCE_THRESHOLD_MS,
   ROLE_SENDER,
   ROLE_RECEIVER,
 } from '../constants';
+
+const STATUS_MESSAGES = {
+  joiningPhone: 'Connecting phone to studio room…',
+  joiningReceiver: 'Connecting PC receiver to studio room…',
+  phoneWaitingForPc: 'Microphone ready. Waiting for PC receiver…',
+  receiverWaitingForPhone: 'PC receiver ready. Waiting for phone…',
+  receiverWaitingForAudio: 'Phone connected. Waiting for audio…',
+  receiverStreaming: 'Receiving phone audio.',
+  receiverSignalLost: 'Phone audio stopped. Waiting for it to return…',
+  serverDisconnected: 'Server disconnected. Reconnecting…',
+};
+const JOIN_FAILED_MESSAGE = 'Could not join the studio room. Please try again.';
+const REMOTE_ACK_DURATION_MS = 2500;
 
 export function useSocketConnection({
   role,
@@ -27,19 +47,25 @@ export function useSocketConnection({
   hasConnectedOnceRef,
   isSignalLost,
   setIsSignalLost,
+  isSenderAudioReady,
 }) {
   const [operatorIssue, setOperatorIssue] = useState(null);
   const [roomState, setRoomState] = useState(null);
   const [latency, setLatency] = useState(null);
   const [bitrate, setBitrate] = useState(null);
+  const [joinError, setJoinError] = useState(null);
+  const [virtualMicState, setVirtualMicState] = useState(null);
   const bytesCountRef = useRef(0);
   const roleRef = useRef(role);
   const roomIdRef = useRef(roomId);
   const inputGainRef = useRef(inputGain);
+  const isSenderAudioReadyRef = useRef(isSenderAudioReady);
+  const remoteAckTimerRef = useRef(null);
 
   useEffect(() => { roleRef.current = role; }, [role]);
   useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
   useEffect(() => { inputGainRef.current = inputGain; }, [inputGain]);
+  useEffect(() => { isSenderAudioReadyRef.current = isSenderAudioReady; }, [isSenderAudioReady]);
 
   const getRemoteAckMessage = (cmd) => {
     if (cmd.type === 'gain') return `✅ Phone confirmed gain: ${Math.round(cmd.value * 100)}%`;
@@ -47,10 +73,50 @@ export function useSocketConnection({
     return '🔊 Phone confirmed: Unmuted';
   };
 
-  const getActiveStatus = (activeRole) => {
-    if (activeRole === 'sender') return 'Broadcasting lossless audio! 🔴';
-    return 'Connected! Audio streaming perfectly. 🔴';
-  };
+  const reportJoinFailure = useCallback((message) => {
+    setJoinError(message);
+    setOperatorIssue(message);
+    setStatus(message);
+    addLog(`❌ ${message}`);
+  }, [addLog, setStatus]);
+
+  const joinRoom = useCallback((socket, targetRoomId, targetRole) => {
+    if (!socket?.connected) return;
+    setJoinError(null);
+    setRoomState(null);
+    if (targetRole === ROLE_RECEIVER) setVirtualMicState(null);
+    const joiningStatus = targetRole === ROLE_SENDER
+      ? STATUS_MESSAGES.joiningPhone
+      : STATUS_MESSAGES.joiningReceiver;
+    setStatus(joiningStatus);
+
+    socket.timeout(JOIN_TIMEOUT_MS).emit('join-room', targetRoomId, targetRole, (error, payload) => {
+      if (roleRef.current !== targetRole) return;
+      if (roomIdRef.current !== targetRoomId) return;
+      if (error) {
+        reportJoinFailure('The server did not answer the room request. Check the connection and try again.');
+        return;
+      }
+
+      const response = normalizeJoinResponse(payload);
+      if (!response) {
+        reportJoinFailure(JOIN_FAILED_MESSAGE);
+        return;
+      }
+      if (!response.ok) {
+        reportJoinFailure(response.message);
+        return;
+      }
+
+      setOperatorIssue(null);
+      addLog(`🔄 Joined room: ${targetRoomId}`);
+      if (targetRole === ROLE_RECEIVER) {
+        setStatus(STATUS_MESSAGES.receiverWaitingForPhone);
+        return;
+      }
+      setStatus(STATUS_MESSAGES.phoneWaitingForPc);
+    });
+  }, [addLog, reportJoinFailure, setStatus]);
 
   // Socket setup
   useEffect(() => {
@@ -66,27 +132,46 @@ export function useSocketConnection({
       addLog('✅ Connected to Node Server');
       setOperatorIssue(null);
       if (roleRef.current) {
-        socket.emit('join-room', roomIdRef.current, roleRef.current);
         addLog(`🔄 Auto-rejoined room: ${roomIdRef.current}`);
-        setStatus(getActiveStatus(roleRef.current));
+        joinRoom(socket, roomIdRef.current, roleRef.current);
         setIsSignalLost(false);
       }
     });
 
     socket.on('disconnect', (reason) => {
       addLog(`⚠️ Socket disconnected: ${reason}`);
-    });
-
-    socket.on('reconnect', (attempt) => {
-      addLog(`✅ Reconnected after ${attempt} attempt(s)`);
+      setLatency(null);
+      setBitrate(null);
+      setRoomState(null);
+      setVirtualMicState(null);
+      if (!roleRef.current) return;
+      setStatus(STATUS_MESSAGES.serverDisconnected);
     });
 
     socket.on('room-state', (state) => {
-      if (!state || state.roomId !== roomIdRef.current) return;
-      setRoomState({
-        senders: Number.isInteger(state.senders) ? state.senders : 0,
-        receivers: Number.isInteger(state.receivers) ? state.receivers : 0,
-      });
+      const normalizedState = normalizeRoomState(state, roomIdRef.current);
+      if (!normalizedState) return;
+      setRoomState(normalizedState);
+
+      if (roleRef.current === ROLE_RECEIVER) {
+        if (normalizedState.senders === 0) {
+          const receiverStatus = hasConnectedOnceRef.current
+            ? STATUS_MESSAGES.receiverSignalLost
+            : STATUS_MESSAGES.receiverWaitingForPhone;
+          setStatus(receiverStatus);
+          if (hasConnectedOnceRef.current) setIsSignalLost(true);
+          return;
+        }
+        if (!hasConnectedOnceRef.current) setStatus(STATUS_MESSAGES.receiverWaitingForAudio);
+        return;
+      }
+
+      if (roleRef.current !== ROLE_SENDER) return;
+      if (!isSenderAudioReadyRef.current) return;
+      const senderStatus = normalizedState.receivers > 0
+        ? 'Broadcasting phone audio to PC.'
+        : STATUS_MESSAGES.phoneWaitingForPc;
+      setStatus(senderStatus);
     });
 
     socket.on('server-warning', (payload) => {
@@ -95,21 +180,28 @@ export function useSocketConnection({
       addLog(`⚠️ ${payload.message}`);
     });
 
+    socket.on('virtual-mic-state', (payload) => {
+      const nextState = normalizeVirtualMicState(payload, roomIdRef.current);
+      if (!nextState) return;
+      setVirtualMicState(nextState);
+      if (!nextState.ready) return;
+      setOperatorIssue(null);
+      addLog(`✅ System microphone ready: ${nextState.sourceName}`);
+    });
+
     return () => {
       socket.off('room-state');
       socket.off('server-warning');
+      socket.off('virtual-mic-state');
       socket.disconnect();
     };
-  }, [addLog, setIsSignalLost, setStatus, socketRef]);
+  }, [addLog, hasConnectedOnceRef, joinRoom, setIsSignalLost, setStatus, socketRef]);
 
   useEffect(() => {
     const socket = socketRef.current;
     if (!role || !socket?.connected) return;
-    socket.emit('join-room', roomId, role);
-    addLog(`🔄 Joined room: ${roomId}`);
-    setStatus(getActiveStatus(role));
-    setIsSignalLost(false);
-  }, [role, roomId, addLog, setIsSignalLost, setStatus, socketRef]);
+    joinRoom(socket, roomId, role);
+  }, [role, roomId, joinRoom, socketRef]);
 
   // Telemetry, ping, remote control, and packet reception
   useEffect(() => {
@@ -155,7 +247,11 @@ export function useSocketConnection({
         }
         const msg = getRemoteAckMessage(cmd);
         setRemoteAckMsg(msg);
-        setTimeout(() => setRemoteAckMsg(null), 2500);
+        if (remoteAckTimerRef.current) clearTimeout(remoteAckTimerRef.current);
+        remoteAckTimerRef.current = setTimeout(() => {
+          setRemoteAckMsg(null);
+          remoteAckTimerRef.current = null;
+        }, REMOTE_ACK_DURATION_MS);
       });
     }
 
@@ -173,6 +269,10 @@ export function useSocketConnection({
       socket.off('pong-rtt');
       socket.off('remote-control');
       socket.off('remote-control-ack');
+      if (remoteAckTimerRef.current) {
+        clearTimeout(remoteAckTimerRef.current);
+        remoteAckTimerRef.current = null;
+      }
     };
   }, [role, inputGain, setInputGain, setIsPhoneMuted, setRemotePhoneGain, setRemoteAckMsg, senderGainNodeRef, addLog, socketRef]);
 
@@ -196,7 +296,7 @@ export function useSocketConnection({
 
       if (isFirstChunk) {
         hasConnectedOnceRef.current = true;
-        setStatus('Connected! Audio streaming perfectly. 🔴');
+        setStatus(STATUS_MESSAGES.receiverStreaming);
         addLog(`🔊 Receiving lossless Int16 audio at ${sampleRate}Hz!`);
         isFirstChunk = false;
       }
@@ -219,20 +319,20 @@ export function useSocketConnection({
     if (role !== ROLE_RECEIVER) return;
 
     const watchdog = setInterval(() => {
-      if (hasConnectedOnceRef.current && roleRef.current === 'receiver') {
-        const silenceDuration = performance.now() - lastChunkTimeRef.current;
-        if (silenceDuration > SILENCE_THRESHOLD_MS) {
-          if (!isSignalLost) {
-            setIsSignalLost(true);
-            setStatus('⚠️ Microphone disconnected!');
-          }
-        } else {
-          if (isSignalLost) {
-            setIsSignalLost(false);
-            setStatus('Connected! Audio streaming perfectly. 🔴');
-          }
-        }
+      if (!hasConnectedOnceRef.current) return;
+      if (roleRef.current !== ROLE_RECEIVER) return;
+
+      const silenceDuration = performance.now() - lastChunkTimeRef.current;
+      if (silenceDuration > SILENCE_THRESHOLD_MS) {
+        if (isSignalLost) return;
+        setIsSignalLost(true);
+        setStatus(STATUS_MESSAGES.receiverSignalLost);
+        return;
       }
+
+      if (!isSignalLost) return;
+      setIsSignalLost(false);
+      setStatus(STATUS_MESSAGES.receiverStreaming);
     }, WATCHDOG_CHECK_INTERVAL_MS);
 
     return () => {
@@ -251,5 +351,8 @@ export function useSocketConnection({
     setRoomState,
     latency,
     bitrate,
+    joinError,
+    virtualMicState,
+    clearJoinError: () => setJoinError(null),
   };
 }

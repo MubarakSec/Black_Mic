@@ -29,13 +29,23 @@ notify() {
   notify-send "Black Mic Studio" "$1" --icon="$ICON" --app-name="Black Mic Studio" 2>/dev/null || true
 }
 
+is_black_mic_pid() {
+  local candidate_pid="$1"
+  [[ "$candidate_pid" =~ ^[0-9]+$ ]] || return 1
+  [ -r "/proc/$candidate_pid/cmdline" ] || return 1
+  tr '\0' ' ' < "/proc/$candidate_pid/cmdline" | grep -Fq "$APP_DIR/server.js"
+}
+
 # ---- Kill old server if running ---------------------------
 if [ -f "$PID_FILE" ]; then
   OLD_PID=$(cat "$PID_FILE")
-  if kill -0 "$OLD_PID" 2>/dev/null; then
+  if kill -0 "$OLD_PID" 2>/dev/null && is_black_mic_pid "$OLD_PID"; then
     echo "[BMS] Stopping old server (PID $OLD_PID)..."
     kill "$OLD_PID" 2>/dev/null || true
     sleep 0.8
+  fi
+  if kill -0 "$OLD_PID" 2>/dev/null && ! is_black_mic_pid "$OLD_PID"; then
+    echo "[BMS] Ignoring stale PID file; PID $OLD_PID belongs to another process."
   fi
   rm -f "$PID_FILE"
 fi
@@ -57,7 +67,11 @@ fi
 if [ "$NEEDS_BUILD" = true ]; then
   echo "[BMS] Building client (source changed)..."
   notify "Building client bundle..."
-  cd "$APP_DIR/client" && npm run build --silent 2>>"$LOG_FILE"
+  if ! (cd "$APP_DIR/client" && npm run build --silent 2>>"$LOG_FILE"); then
+    notify "❌ Client build failed — check $LOG_FILE"
+    echo "[BMS] Client build failed. Logs: $LOG_FILE"
+    exit 1
+  fi
   cd "$APP_DIR"
 fi
 
