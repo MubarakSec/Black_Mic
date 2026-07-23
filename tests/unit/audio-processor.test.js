@@ -26,6 +26,7 @@ function loadProcessorClass() {
     ArrayBuffer,
     Int16Array,
     Math,
+    sampleRate: 48000,
     registerProcessor: (_name, processorClass) => {
       ProcessorClass = processorClass;
     },
@@ -54,6 +55,16 @@ function processMonoSample(processor, sample) {
   return new Int16Array(lastCallArgs[0].buffer);
 }
 
+function configureNoiseReduction(processor, enabled, noiseFloorRms) {
+  processor.port.onmessage({
+    data: {
+      type: 'configure-noise-reduction',
+      enabled,
+      noiseFloorRms,
+    },
+  });
+}
+
 describe('AudioProcessor PCM encoding', () => {
   it('preserves low-level input without chopping it', () => {
     const pcm = processMonoSample(createProcessor(), IDLE_NOISE_SAMPLE);
@@ -71,6 +82,44 @@ describe('AudioProcessor PCM encoding', () => {
     const processor = createProcessor();
 
     processMonoSample(processor, VOICE_SAMPLE);
+    const pcm = processMonoSample(processor, IDLE_NOISE_SAMPLE);
+
+    expect(Math.max(...pcm.map(Math.abs))).toBeGreaterThan(PCM_IDLE_NOISE_FLOOR);
+  });
+
+  it('smoothly attenuates audio at the calibrated fan-noise floor', () => {
+    const processor = createProcessor();
+    configureNoiseReduction(processor, true, IDLE_NOISE_SAMPLE);
+
+    for (let batch = 0; batch < 40; batch++) {
+      processMonoSample(processor, IDLE_NOISE_SAMPLE);
+    }
+    const pcm = processMonoSample(processor, IDLE_NOISE_SAMPLE);
+
+    expect(Math.max(...pcm.map(Math.abs))).toBeLessThan(40);
+    expect(Math.max(...pcm.map(Math.abs))).toBeGreaterThan(PCM_IDLE_NOISE_FLOOR);
+  });
+
+  it('opens quickly for voice after reducing fan noise', () => {
+    const processor = createProcessor();
+    configureNoiseReduction(processor, true, IDLE_NOISE_SAMPLE);
+
+    for (let batch = 0; batch < 40; batch++) {
+      processMonoSample(processor, IDLE_NOISE_SAMPLE);
+    }
+    const pcm = processMonoSample(processor, VOICE_SAMPLE);
+
+    expect(Math.max(...pcm.map(Math.abs))).toBeGreaterThan(PCM_VOICE_FLOOR);
+  });
+
+  it('bypasses fan reduction when it is disabled at runtime', () => {
+    const processor = createProcessor();
+    configureNoiseReduction(processor, true, IDLE_NOISE_SAMPLE);
+
+    for (let batch = 0; batch < 40; batch++) {
+      processMonoSample(processor, IDLE_NOISE_SAMPLE);
+    }
+    configureNoiseReduction(processor, false, IDLE_NOISE_SAMPLE);
     const pcm = processMonoSample(processor, IDLE_NOISE_SAMPLE);
 
     expect(Math.max(...pcm.map(Math.abs))).toBeGreaterThan(PCM_IDLE_NOISE_FLOOR);

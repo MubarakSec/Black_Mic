@@ -51,6 +51,7 @@ export default function StudioConsole({
   onToggleMonitoring,
   onCalibrateNoise,
   onToggleNoiseReduction,
+  onSetNoiseFloor,
   onStartAudioRecording,
   onStopAudioRecording,
   onDisconnect,
@@ -86,6 +87,7 @@ export default function StudioConsole({
           noiseReductionActive={noiseReductionActive}
           onCalibrateNoise={onCalibrateNoise}
           onToggleNoiseReduction={onToggleNoiseReduction}
+          onSetNoiseFloor={onSetNoiseFloor}
         />
       )}
 

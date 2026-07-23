@@ -3,14 +3,15 @@ import {
   LS_INPUT_GAIN,
   LS_OUTPUT_VOLUME,
   LS_NOISE_REDUCTION,
+  LS_NOISE_FLOOR,
   CHANNEL_MONO,
   CHANNEL_STEREO,
   MICROPHONE_SAMPLE_RATE,
   LATENCY_HINT,
   CALIBRATION_DURATION_MS,
   CALIBRATION_SAMPLE_INTERVAL_MS,
-  NOISE_GATE_RATIO_ATTACK,
-  NOISE_GATE_MAX_ATTENUATION,
+  MIN_NOISE_FLOOR_DB,
+  MAX_NOISE_FLOOR_DB,
   ALARM_INTERVAL_MS,
   ALARM_PITCH_HZ,
   ALARM_BEEP_DURATION_SEC,
@@ -19,8 +20,8 @@ import {
   FFT_SIZE,
   ROLE_SENDER,
   ROLE_RECEIVER,
-  CHANNEL_MODE_MONO,
   CHANNEL_MODE_STEREO,
+  PROFILE_RAW,
   PROFILE_CLEAN,
   PROFILE_FAN,
   PROFILE_CALL,
@@ -42,7 +43,12 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
   const [isSignalLost, setIsSignalLost] = useState(false);
   const [micSettings, setMicSettings] = useState(null);
   const [isCalibrating, setIsCalibrating] = useState(false);
-  const [noiseFloorDb, setNoiseFloorDb] = useState(null);
+  const [noiseFloorDb, setNoiseFloorDb] = useState(() => {
+    const stored = localStorage.getItem(LS_NOISE_FLOOR);
+    const parsed = stored ? parseFloat(stored) : null;
+    if (!Number.isFinite(parsed)) return null;
+    return Math.max(MIN_NOISE_FLOOR_DB, Math.min(MAX_NOISE_FLOOR_DB, parsed));
+  });
   const [noiseReductionActive, setNoiseReductionActive] = useState(() => {
     return localStorage.getItem(LS_NOISE_REDUCTION) === 'true';
   });
@@ -50,8 +56,6 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
   const canvasDimsRef = useRef({ width: 0, height: 0 });
   const localStreamRef = useRef(null);
   const noiseAnalysisAnalyserRef = useRef(null);
-  const noiseGateGainRef = useRef(null);
-  const noiseFloorRef = useRef(null);
   const calibrationSamplesRef = useRef([]);
   const calibrationTimerRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -79,6 +83,17 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
   useEffect(() => { localStorage.setItem(LS_INPUT_GAIN, inputGain); }, [inputGain]);
   useEffect(() => { localStorage.setItem(LS_OUTPUT_VOLUME, outputVolume); }, [outputVolume]);
   useEffect(() => { localStorage.setItem(LS_NOISE_REDUCTION, noiseReductionActive); }, [noiseReductionActive]);
+  useEffect(() => { if (noiseFloorDb !== null) localStorage.setItem(LS_NOISE_FLOOR, noiseFloorDb); }, [noiseFloorDb]);
+
+  useEffect(() => {
+    if (!processorRef.current) return;
+    const hasNoiseFloor = noiseFloorDb !== null && Number.isFinite(noiseFloorDb);
+    processorRef.current.port.postMessage({
+      type: 'configure-noise-reduction',
+      enabled: audioProfile === PROFILE_FAN && noiseReductionActive && hasNoiseFloor,
+      noiseFloorRms: hasNoiseFloor ? Math.pow(10, noiseFloorDb / 20) : null,
+    });
+  }, [audioProfile, noiseFloorDb, noiseReductionActive]);
 
   // Update sender gain dynamically
   useEffect(() => {
@@ -224,20 +239,6 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
       }
       const average = sum / bufferLength;
 
-      // Adaptive noise gate: compare current RMS to calibrated noise floor
-      if (noiseFloorRef.current && noiseReductionActive && role === ROLE_SENDER && noiseAnalysisAnalyserRef.current) {
-        const timeData = new Uint8Array(noiseAnalysisAnalyserRef.current.fftSize);
-        noiseAnalysisAnalyserRef.current.getByteTimeDomainData(timeData);
-        let sumSq = 0;
-        for (let i = 0; i < timeData.length; i++) {
-          const norm = (timeData[i] - 128) / 128;
-          sumSq += norm * norm;
-        }
-        const currentRMS = Math.sqrt(sumSq / timeData.length);
-        const targetGain = computeNoiseGateGain(currentRMS, noiseFloorRef.current.rms);
-        noiseGateGainRef.current.gain.setTargetAtTime(targetGain, audioContextRef.current.currentTime, 0.05);
-      }
-
       // Direct DOM manipulation of the UI elements for high performance
       if (role === ROLE_SENDER && telemetryRef.current.peakDb !== -100) {
         const t = telemetryRef.current;
@@ -314,7 +315,7 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
     addLog(`🎙️ Requesting Mic access... (Room: ${roomId})`);
     try {
       await requestWakeLock();
-      const wantsNs = audioProfile === PROFILE_FAN || audioProfile === PROFILE_CALL;
+      const wantsNs = audioProfile === PROFILE_CALL;
       const wantsEc = audioProfile === PROFILE_CALL;
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -365,43 +366,61 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
         channelCount: channelMode === CHANNEL_MODE_STEREO ? CHANNEL_STEREO : CHANNEL_MONO,
         channelCountMode: 'explicit',
         processorOptions: {
-          isStereo: channelMode === CHANNEL_MODE_STEREO
+          isStereo: channelMode === CHANNEL_MODE_STEREO,
+          noiseReductionEnabled: audioProfile === PROFILE_FAN && noiseReductionActive && noiseFloorDb !== null,
+          noiseFloorRms: noiseFloorDb === null ? null : Math.pow(10, noiseFloorDb / 20),
         }
       });
       processorRef.current = workletNode;
 
-      if (audioProfile === PROFILE_CLEAN) {
-        // Clean Voice DSP Chain
-        const highPass = audioContextRef.current.createBiquadFilter();
-        highPass.type = 'highpass';
-        highPass.frequency.value = 80;
-        highPass.Q.value = 0.7;
+      const connectProfileInput = () => {
+        if (audioProfile === PROFILE_CLEAN) {
+          const highPass = audioContextRef.current.createBiquadFilter();
+          highPass.type = 'highpass';
+          highPass.frequency.value = 80;
+          highPass.Q.value = 0.7;
 
-        const compressor = audioContextRef.current.createDynamicsCompressor();
-        compressor.threshold.value = -18;
-        compressor.knee.value = 8;
-        compressor.ratio.value = 3;
-        compressor.attack.value = 0.005;
-        compressor.release.value = 0.18;
+          const compressor = audioContextRef.current.createDynamicsCompressor();
+          compressor.threshold.value = -18;
+          compressor.knee.value = 8;
+          compressor.ratio.value = 3;
+          compressor.attack.value = 0.005;
+          compressor.release.value = 0.18;
 
-        source.connect(highPass);
-        highPass.connect(compressor);
-        compressor.connect(senderGainNodeRef.current);
-      } else {
-        // Raw or Call mode
+          source.connect(highPass);
+          highPass.connect(compressor);
+          compressor.connect(senderGainNodeRef.current);
+          return;
+        }
+        if (audioProfile === PROFILE_FAN) {
+          const highPass = audioContextRef.current.createBiquadFilter();
+          highPass.type = 'highpass';
+          highPass.frequency.value = 80;
+          highPass.Q.value = 0.7;
+
+          source.connect(highPass);
+          highPass.connect(senderGainNodeRef.current);
+          return;
+        }
         source.connect(senderGainNodeRef.current);
-      }
+      };
+      connectProfileInput();
       
-      // Noise gate gain node (inserted between sender gain and output)
-      noiseGateGainRef.current = audioContextRef.current.createGain();
-      noiseGateGainRef.current.gain.value = 1.0;
+      // Keep RAW untouched for external processing; other profiles get peak protection.
+      const limiter = audioContextRef.current.createDynamicsCompressor();
+      limiter.threshold.value = -3;
+      limiter.knee.value = 0;
+      limiter.ratio.value = 20;
+      limiter.attack.value = 0.002;
+      limiter.release.value = 0.08;
       noiseAnalysisAnalyserRef.current = audioContextRef.current.createAnalyser();
       noiseAnalysisAnalyserRef.current.fftSize = 256;
 
       senderGainNodeRef.current.connect(noiseAnalysisAnalyserRef.current);
-      senderGainNodeRef.current.connect(noiseGateGainRef.current);
-      noiseGateGainRef.current.connect(analyserRef.current);
-      noiseGateGainRef.current.connect(workletNode);
+      const outputNode = audioProfile === PROFILE_RAW ? senderGainNodeRef.current : limiter;
+      if (audioProfile !== PROFILE_RAW) senderGainNodeRef.current.connect(limiter);
+      outputNode.connect(analyserRef.current);
+      outputNode.connect(workletNode);
       workletNode.connect(audioContextRef.current.destination);
 
       workletNode.port.onmessage = (e) => {
@@ -507,8 +526,7 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
       clearInterval(calibrationTimerRef.current);
       calibrationTimerRef.current = null;
     }
-    noiseFloorRef.current = null;
-    noiseGateGainRef.current = null;
+    setIsCalibrating(false);
     noiseAnalysisAnalyserRef.current = null;
     if (processorRef.current) {
       processorRef.current.disconnect();
@@ -546,38 +564,34 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
     }
   };
 
-  const computeNoiseGateGain = (currentRMS, floorRMS) => {
-    const ratio = currentRMS / floorRMS;
-    if (ratio <= 1) return NOISE_GATE_MAX_ATTENUATION;
-    if (ratio >= NOISE_GATE_RATIO_ATTACK) return 1.0;
-    const t = (ratio - 1) / (NOISE_GATE_RATIO_ATTACK - 1);
-    return NOISE_GATE_MAX_ATTENUATION + t * (1.0 - NOISE_GATE_MAX_ATTENUATION);
-  };
-
   const startNoiseCalibration = useCallback(() => {
-    if (!noiseAnalysisAnalyserRef.current || !audioContextRef.current) return;
+    if (!noiseAnalysisAnalyserRef.current || !audioContextRef.current) {
+      addLog('⚠️ Start the microphone before calibrating fan noise.');
+      return;
+    }
+    if (calibrationTimerRef.current) clearInterval(calibrationTimerRef.current);
     setIsCalibrating(true);
     calibrationSamplesRef.current = [];
     addLog('🔇 Calibrating fan noise... Stay silent for 3 seconds.');
     const sampleCount = Math.floor(CALIBRATION_DURATION_MS / CALIBRATION_SAMPLE_INTERVAL_MS);
     const timer = setInterval(() => {
-      const timeData = new Uint8Array(noiseAnalysisAnalyserRef.current.fftSize);
-      noiseAnalysisAnalyserRef.current.getByteTimeDomainData(timeData);
+      const timeData = new Float32Array(noiseAnalysisAnalyserRef.current.fftSize);
+      noiseAnalysisAnalyserRef.current.getFloatTimeDomainData(timeData);
       let sumSq = 0;
       for (let i = 0; i < timeData.length; i++) {
-        const norm = (timeData[i] - 128) / 128;
-        sumSq += norm * norm;
+        sumSq += timeData[i] * timeData[i];
       }
       calibrationSamplesRef.current.push(Math.sqrt(sumSq / timeData.length));
       if (calibrationSamplesRef.current.length >= sampleCount) {
         clearInterval(timer);
         const sorted = [...calibrationSamplesRef.current].sort((a, b) => a - b);
-        const noiseRms = sorted[Math.floor(sorted.length * 0.3)];
-        noiseFloorRef.current = { rms: noiseRms };
+        const noiseRms = sorted[Math.floor(sorted.length * 0.5)];
         const noiseDb = 20 * Math.log10(Math.max(noiseRms, 1e-8));
-        setNoiseFloorDb(Math.round(noiseDb * 10) / 10);
+        const safeNoiseDb = Math.max(MIN_NOISE_FLOOR_DB, Math.min(MAX_NOISE_FLOOR_DB, noiseDb));
+        setNoiseFloorDb(Math.round(safeNoiseDb * 10) / 10);
         setIsCalibrating(false);
         setNoiseReductionActive(true);
+        calibrationTimerRef.current = null;
         addLog(`✅ Noise floor calibrated: ${noiseDb.toFixed(1)} dBFS`);
       }
     }, CALIBRATION_SAMPLE_INTERVAL_MS);
@@ -587,12 +601,14 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
   const toggleNoiseReduction = () => {
     const next = !noiseReductionActive;
     setNoiseReductionActive(next);
-    if (noiseGateGainRef.current) {
-      noiseGateGainRef.current.gain.value = next ? 1.0 : 1.0;
-    }
-    if (!next) noiseFloorRef.current = null;
-    addLog(next ? '🎛️ Noise reduction activated' : '🎛️ Noise reduction deactivated');
+    addLog(next ? '🎛️ Smooth fan reduction activated' : '🎛️ Fan reduction deactivated');
   };
+
+  const setManualNoiseFloor = useCallback((dbValue) => {
+    const safeDbValue = Math.max(MIN_NOISE_FLOOR_DB, Math.min(MAX_NOISE_FLOOR_DB, dbValue));
+    setNoiseFloorDb(Math.round(safeDbValue * 10) / 10);
+    addLog(`🎛️ Noise floor manually set to ${safeDbValue.toFixed(1)} dBFS`);
+  }, [addLog]);
 
   const toggleMonitoring = () => {
     if (!audioContextRef.current || !analyserRef.current) return;
@@ -649,5 +665,6 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
     toggleMonitoring,
     startNoiseCalibration,
     toggleNoiseReduction,
+    setManualNoiseFloor,
   };
 }

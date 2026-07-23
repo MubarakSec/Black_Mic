@@ -4,6 +4,12 @@ const SAMPLE_MIN = -1;
 const SAMPLE_MAX = 1;
 const PCM_BYTES_PER_SAMPLE = 2;
 const BATCH_FRAMES = 512; // ~10.7ms at 48kHz
+const DEFAULT_SAMPLE_RATE = 48000;
+const MIN_REDUCTION_GAIN = 0.35;
+const REDUCTION_START_RATIO = 1.1;
+const REDUCTION_END_RATIO = 3;
+const REDUCTION_ATTACK_SEC = 0.003;
+const REDUCTION_RELEASE_SEC = 0.3;
 
 function clampSample(sample) {
   if (sample < SAMPLE_MIN) return SAMPLE_MIN;
@@ -20,6 +26,10 @@ class AudioProcessor extends AudioWorkletProcessor {
   constructor(options) {
     super();
     this.isStereo = options?.processorOptions?.isStereo ?? false;
+    this.noiseReductionEnabled = options?.processorOptions?.noiseReductionEnabled ?? false;
+    this.noiseFloorRms = this.validateNoiseFloor(options?.processorOptions?.noiseFloorRms);
+    this.reductionGain = 1;
+    this.contextSampleRate = typeof sampleRate === 'number' ? sampleRate : DEFAULT_SAMPLE_RATE;
     this.bufferPool = [];
     this.frameOffset = 0;
     
@@ -35,8 +45,50 @@ class AudioProcessor extends AudioWorkletProcessor {
     this.port.onmessage = (e) => {
       if (e.data instanceof ArrayBuffer) {
         this.bufferPool.push(e.data);
+        return;
       }
+      if (e.data?.type !== 'configure-noise-reduction') return;
+      this.noiseReductionEnabled = e.data.enabled === true;
+      this.noiseFloorRms = this.validateNoiseFloor(e.data.noiseFloorRms);
     };
+  }
+
+  validateNoiseFloor(value) {
+    if (!Number.isFinite(value)) return null;
+    if (value <= 0 || value > SAMPLE_MAX) return null;
+    return value;
+  }
+
+  computeReductionTarget(input, channelLength) {
+    if (!this.noiseReductionEnabled || !this.noiseFloorRms) return 1;
+
+    let sumSquares = 0;
+    let sampleCount = 0;
+    for (let channelIndex = 0; channelIndex < input.length; channelIndex++) {
+      const channel = input[channelIndex];
+      for (let frameIndex = 0; frameIndex < channelLength; frameIndex++) {
+        sumSquares += channel[frameIndex] * channel[frameIndex];
+      }
+      sampleCount += channelLength;
+    }
+
+    const rms = Math.sqrt(sumSquares / sampleCount);
+    const ratio = rms / this.noiseFloorRms;
+    if (ratio <= REDUCTION_START_RATIO) return MIN_REDUCTION_GAIN;
+    if (ratio >= REDUCTION_END_RATIO) return 1;
+
+    const position = (ratio - REDUCTION_START_RATIO) / (REDUCTION_END_RATIO - REDUCTION_START_RATIO);
+    const smoothPosition = position * position * (3 - (2 * position));
+    return MIN_REDUCTION_GAIN + (smoothPosition * (1 - MIN_REDUCTION_GAIN));
+  }
+
+  applySmoothedReduction(sample, targetGain) {
+    const timeConstant = targetGain > this.reductionGain
+      ? REDUCTION_ATTACK_SEC
+      : REDUCTION_RELEASE_SEC;
+    const coefficient = 1 - Math.exp(-1 / (this.contextSampleRate * timeConstant));
+    this.reductionGain += (targetGain - this.reductionGain) * coefficient;
+    return sample * this.reductionGain;
   }
 
   getBufferFromPool() {
@@ -56,6 +108,7 @@ class AudioProcessor extends AudioWorkletProcessor {
     if (!channelLength) return true;
 
     const isStereoActive = this.isStereo && input.length >= 2;
+    const reductionTarget = this.computeReductionTarget(input, channelLength);
 
     // Merge encoding + telemetry into a single loop
     const monoInput = input[0];
@@ -64,9 +117,10 @@ class AudioProcessor extends AudioWorkletProcessor {
       const stereoInput1 = input[1];
       for (let i = 0; i < channelLength; i++) {
         const offset = (this.frameOffset + i) * 2;
-        const sample = monoInput[i];
+        const sample = this.applySmoothedReduction(monoInput[i], reductionTarget);
+        const stereoSample = stereoInput1[i] * this.reductionGain;
         this.currentInt16Array[offset] = floatToInt16(sample);
-        this.currentInt16Array[offset + 1] = floatToInt16(stereoInput1[i]);
+        this.currentInt16Array[offset + 1] = floatToInt16(stereoSample);
         const abs = Math.abs(sample);
         if (abs > this.peak) this.peak = abs;
         this.sumSquares += sample * sample;
@@ -74,7 +128,7 @@ class AudioProcessor extends AudioWorkletProcessor {
       }
     } else {
       for (let i = 0; i < channelLength; i++) {
-        const sample = monoInput[i];
+        const sample = this.applySmoothedReduction(monoInput[i], reductionTarget);
         this.currentInt16Array[this.frameOffset + i] = floatToInt16(sample);
         const abs = Math.abs(sample);
         if (abs > this.peak) this.peak = abs;

@@ -53,7 +53,8 @@ export const GLOW_VOLUME_THRESHOLD = 30;
 
 // Noise reduction
 export const LS_NOISE_REDUCTION = 'bms_noiseReduction';
+export const LS_NOISE_FLOOR = 'bms_noiseFloor';
 export const CALIBRATION_DURATION_MS = 3000;
 export const CALIBRATION_SAMPLE_INTERVAL_MS = 100;
-export const NOISE_GATE_RATIO_ATTACK = 4;  // RMS ratio above floor → full passthrough
-export const NOISE_GATE_MAX_ATTENUATION = 0.2; // -14dB max reduction (≈80%)
+export const MIN_NOISE_FLOOR_DB = -100;
+export const MAX_NOISE_FLOOR_DB = -6;

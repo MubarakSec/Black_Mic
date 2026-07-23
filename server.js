@@ -131,6 +131,7 @@ io.on('connection', (socket) => {
   socket.on('pcm-chunk', (chunk, roomId) => {
     if (!isValidRoomId(roomId)) return;
     if (!isSocketInRoom(socket, roomId)) return;
+    if (getSocketRoom(socket)?.role !== 'sender') return;
     const pcmChunk = normalizePcmChunk(chunk);
     if (!pcmChunk) return;
 

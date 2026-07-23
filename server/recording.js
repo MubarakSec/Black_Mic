@@ -1,12 +1,12 @@
 'use strict';
 
 const { spawn } = require('child_process');
-const { upmixMonoToStereoBuffer } = require('./pcm-utils');
+const { downmixStereoToMonoBuffer } = require('./pcm-utils');
 
 const DEFAULT_SAMPLE_RATE = 48000;
 const MONO_CHANNEL_COUNT = 1;
 const MONO_CHANNEL_MAP = 'mono';
-const PCM_FLUSH_THRESHOLD_BYTES = 1920; // 10ms over USB
+const PCM_FLUSH_THRESHOLD_BYTES = 1920; // ~20ms at 48kHz mono 16-bit (2 worklet packets)
 
 /**
  * Per-room session state.
@@ -86,6 +86,13 @@ async function initRoom(roomId) {
   return result;
 }
 
+function resetBridgeState(session, bridge) {
+  if (session.audioBridge === bridge) session.audioBridge = null;
+  session.isDraining = false;
+  session.pcmBufferQueue = [];
+  session.pcmBufferBytes = 0;
+}
+
 // ---------------------------------------------------------------------------
 // Audio bridge: PCM stdin -> PulseAudio virtual sink
 // ---------------------------------------------------------------------------
@@ -115,11 +122,12 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
       '--latency-msec=10'
     ], { stdio: ['pipe', 'ignore', 'ignore'] });
     s.audioBridge = audioBridge;
+    s.isDraining = false;
     audioBridge.on('error', e => console.error('[BMS] Audio bridge error:', e.message));
     audioBridge.stdin.on('error', err => {
       if (err.code === 'EPIPE') {
         console.error('[BMS] EPIPE on pacat. The bridge died, will restart next frame.');
-        if (s.audioBridge === audioBridge) s.audioBridge = null;
+        if (s.audioBridge === audioBridge) resetBridgeState(s, audioBridge);
       } else {
         console.error('[BMS] Stdin error:', err.message);
       }
@@ -130,14 +138,17 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
     });
     audioBridge.on('close', () => {
       if (s.audioBridge !== audioBridge) return;
-      s.audioBridge = null;
+      resetBridgeState(s, audioBridge);
     });
     console.log(`[BMS] pacat audio bridge: ${sampleRate}Hz mono -> ${s.sinkName}`);
   }
 
+  // Downmix stereo to mono for the PipeWire sink (always mono)
+  const monoBuffer = channelCount === 2 ? downmixStereoToMonoBuffer(pcmBuffer) : pcmBuffer;
+
   // Aggregate chunks into ~10ms blocks to prevent pipe starvation pops
-  s.pcmBufferQueue.push(pcmBuffer);
-  s.pcmBufferBytes += pcmBuffer.length;
+  s.pcmBufferQueue.push(monoBuffer);
+  s.pcmBufferBytes += monoBuffer.length;
 
   if (s.pcmBufferBytes >= PCM_FLUSH_THRESHOLD_BYTES) {
     const chunk = Buffer.concat(s.pcmBufferQueue);

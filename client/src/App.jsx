@@ -17,10 +17,7 @@ import {
   ROLE_SENDER,
   ROLE_RECEIVER,
   CHANNEL_MODE_MONO,
-  CHANNEL_MODE_STEREO,
-  PROFILE_RAW,
   PROFILE_CLEAN,
-  PROFILE_CALL,
 } from './constants';
 import './index.css';
 import './components.css';
@@ -87,6 +84,9 @@ function App() {
     cleanupAudio,
     unlockAudio,
     toggleMonitoring,
+    startNoiseCalibration,
+    toggleNoiseReduction,
+    setManualNoiseFloor,
   } = useAudioEngine({
     role,
     channelMode,
@@ -256,6 +256,7 @@ function App() {
         onToggleMonitoring={toggleMonitoring}
         onCalibrateNoise={startNoiseCalibration}
         onToggleNoiseReduction={toggleNoiseReduction}
+        onSetNoiseFloor={setManualNoiseFloor}
         onStartAudioRecording={startAudioOnlyRecording}
         onStopAudioRecording={stopAudioOnlyRecording}
         onDisconnect={handleDisconnect}

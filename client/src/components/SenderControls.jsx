@@ -1,10 +1,10 @@
-import React from 'react';
 import { PROFILE_RAW, PROFILE_CLEAN, PROFILE_FAN, PROFILE_CALL, CHANNEL_MODE_MONO, CHANNEL_MODE_STEREO } from '../constants';
+import FanNoiseControls from './FanNoiseControls';
 
 const PROFILE_LABELS = {
   [PROFILE_RAW]:   'RAW — No browser DSP, no Android filters',
   [PROFILE_CLEAN]: 'CLEAN — 80 Hz HPF + Compressor (Web Audio)',
-  [PROFILE_FAN]:   'FAN — Browser NS only (fan suppression, no echo cancel)',
+  [PROFILE_FAN]:   'FAN — Calibrated gentle reduction (no Android noise suppression)',
   [PROFILE_CALL]:  'CALL — Android EC + NS (for open speakers)',
 };
 
@@ -12,7 +12,7 @@ const PROFILE_LABELS = {
 const PROFILE_WANTS = {
   [PROFILE_RAW]:   { noiseSuppression: false, echoCancellation: false },
   [PROFILE_CLEAN]: { noiseSuppression: false, echoCancellation: false },
-  [PROFILE_FAN]:   { noiseSuppression: true,  echoCancellation: false },
+  [PROFILE_FAN]:   { noiseSuppression: false, echoCancellation: false },
   [PROFILE_CALL]:  { noiseSuppression: true,  echoCancellation: true  },
 };
 
@@ -42,6 +42,7 @@ export default function SenderControls({
   noiseReductionActive,
   onCalibrateNoise,
   onToggleNoiseReduction,
+  onSetNoiseFloor,
 }) {
   const wants = PROFILE_WANTS[audioProfile];
 
@@ -170,45 +171,15 @@ export default function SenderControls({
         </div>
       )}
 
-      <div style={{ marginTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '0.75rem' }}>
-        <div style={{ fontSize: '0.72rem', opacity: 0.45, marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-          Fan Noise Reduction
-        </div>
-        {!noiseFloorDb ? (
-          <button
-            className={`btn-control ${isCalibrating ? 'is-warning-active' : ''}`}
-            onClick={onCalibrateNoise}
-            disabled={isCalibrating}
-            style={{ width: '100%', padding: '0.5rem 0' }}
-          >
-            {isCalibrating ? '🔇 Calibrating... Stay silent' : '🎯 Calibrate Fan Noise'}
-          </button>
-        ) : (
-          <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center', fontSize: '0.8rem' }}>
-            <span style={{ opacity: 0.6 }}>Floor:</span>
-            <span style={{ fontFamily: 'JetBrains Mono', color: 'var(--accent-1)' }}>{noiseFloorDb} dBFS</span>
-            <button
-              className={`btn-control ${noiseReductionActive ? 'is-sender-active' : ''}`}
-              onClick={onToggleNoiseReduction}
-              style={{ padding: '0.3rem 0.6rem' }}
-            >
-              {noiseReductionActive ? 'ON' : 'OFF'}
-            </button>
-            <button
-              className="btn-control"
-              onClick={onCalibrateNoise}
-              style={{ padding: '0.3rem 0.6rem' }}
-            >
-              Recal
-            </button>
-          </div>
-        )}
-        {noiseFloorDb && noiseReductionActive && (
-          <div style={{ fontSize: '0.7rem', opacity: 0.45, marginTop: '0.3rem', textAlign: 'center' }}>
-            Suppressing stationary noise below {noiseFloorDb} dBFS
-          </div>
-        )}
-      </div>
+      <FanNoiseControls
+        isFanProfile={audioProfile === PROFILE_FAN}
+        isCalibrating={isCalibrating}
+        noiseFloorDb={noiseFloorDb}
+        noiseReductionActive={noiseReductionActive}
+        onCalibrateNoise={onCalibrateNoise}
+        onToggleNoiseReduction={onToggleNoiseReduction}
+        onSetNoiseFloor={onSetNoiseFloor}
+      />
     </>
   );
 }
