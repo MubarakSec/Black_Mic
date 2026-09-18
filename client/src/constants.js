@@ -9,6 +9,7 @@ export const LS_OUTPUT_VOLUME = 'bms_outputVolume';
 export const LS_CHANNEL_MODE = 'bms_channelMode'; // 'mono' | 'stereo'
 export const LS_AUDIO_PROFILE = 'bms_audioProfile';
 export const LS_RECEIVER_BUFFER_MS = 'bms_receiverBufferMs';
+export const LS_MIC_DEVICE_ID = 'bms_micDeviceId';
 
 // Audio channel modes
 export const CHANNEL_MONO = 1;

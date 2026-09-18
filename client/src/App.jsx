@@ -5,6 +5,7 @@ import SignalLostOverlay from './components/SignalLostOverlay';
 import StudioConsole from './components/StudioConsole';
 import { useRecording } from './hooks/useRecording';
 import { useAudioEngine } from './hooks/useAudioEngine';
+import { useMicrophoneDevices } from './hooks/useMicrophoneDevices';
 import { useSocketConnection } from './hooks/useSocketConnection';
 import { isValidRoomId } from './utils/socketValidation';
 import {
@@ -53,6 +54,15 @@ function App() {
   useEffect(() => { localStorage.setItem(LS_AUDIO_PROFILE, audioProfile); }, [audioProfile]);
   useEffect(() => { localStorage.setItem(LS_RECEIVER_BUFFER_MS, jitterBufferMs); }, [jitterBufferMs]);
 
+  // Hardware Microphone Devices Hook
+  const {
+    devices: availableMics,
+    selectedDeviceId,
+    setSelectedDeviceId,
+    selectedDeviceRecommendation,
+    refreshDevices,
+  } = useMicrophoneDevices();
+
   // Audio Engine Hook (handles audio graphs, nodes, visualizer direct DOM rendering)
   const {
     inputGain,
@@ -98,6 +108,8 @@ function App() {
     socketRef,
     roomId,
     jitterBufferMs,
+    selectedDeviceId,
+    onMicStarted: refreshDevices,
   });
 
   // Socket Connection Hook (handles Socket.IO, pcm-chunk relay, RTT ping, bitrate calculation)
@@ -133,7 +145,7 @@ function App() {
   // Share the actual socketRef from useSocketConnection with useAudioEngine
   const audioContextRefSynced = useRef(false);
   useEffect(() => {
-    // Dynamic binding to restart sender if channel mode or profile changes
+    // Dynamic binding to restart sender if channel mode, profile, or mic changes
     if (role === ROLE_SENDER && audioContextRefSynced.current) {
       addLog(`🔄 Settings changed. Restarting mic stream...`);
       cleanupAudio();
@@ -141,7 +153,7 @@ function App() {
     }
     audioContextRefSynced.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channelMode, audioProfile]);
+  }, [channelMode, audioProfile, selectedDeviceId]);
 
   // Recording Hook
   const {
@@ -280,6 +292,10 @@ function App() {
         setChannelMode={setChannelMode}
         audioProfile={audioProfile}
         setAudioProfile={setAudioProfile}
+        availableMics={availableMics}
+        selectedDeviceId={selectedDeviceId}
+        onSelectDevice={setSelectedDeviceId}
+        selectedDeviceRecommendation={selectedDeviceRecommendation}
         outputVolume={outputVolume}
         setOutputVolume={setOutputVolume}
         jitterBufferMs={jitterBufferMs}

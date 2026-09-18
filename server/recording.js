@@ -46,6 +46,12 @@ function spawnPactl(args) {
   });
 }
 
+let pactlRunner = spawnPactl;
+
+function setPactlRunnerForTest(runner) {
+  pactlRunner = runner || spawnPactl;
+}
+
 async function initRoom(roomId) {
   const pendingCleanup = cleaningRooms.get(roomId);
   if (pendingCleanup) await pendingCleanup;
@@ -62,7 +68,7 @@ async function initRoom(roomId) {
   const initPromise = (async () => {
     const sinkName = `BMS_${roomId}_Sink`;
     const sourceName = `BlackMic_${roomId}`;
-    const { code: codeSink, out: sinkModuleId } = await spawnPactl([
+    const { code: codeSink, out: sinkModuleId } = await pactlRunner([
       'load-module', 'module-null-sink',
       `sink_name=${sinkName}`,
       `channels=${MONO_CHANNEL_COUNT}`,
@@ -76,7 +82,7 @@ async function initRoom(roomId) {
       return { ok: false, message };
     }
 
-    const { code: codeSource, out: sourceModuleId } = await spawnPactl([
+    const { code: codeSource, out: sourceModuleId } = await pactlRunner([
       'load-module', 'module-remap-source',
       `source_name=${sourceName}`,
       `master=${sinkName}.monitor`,
@@ -85,13 +91,13 @@ async function initRoom(roomId) {
 
     if (codeSource !== 0) {
       console.warn(`[BMS] Failed to create remap source. Rolling back null-sink module.`);
-      await spawnPactl(['unload-module', sinkModuleId]);
+      await pactlRunner(['unload-module', sinkModuleId]);
       return { ok: false, message: `Failed to create remap source for room ${roomId}.` };
     }
 
     if (generation !== getRoomGeneration(roomId)) {
-      await spawnPactl(['unload-module', sourceModuleId]);
-      await spawnPactl(['unload-module', sinkModuleId]);
+      await pactlRunner(['unload-module', sourceModuleId]);
+      await pactlRunner(['unload-module', sinkModuleId]);
       return {
         ok: false,
         cancelled: true,
@@ -218,7 +224,6 @@ function stopProcess(childProcess) {
   if (!childProcess) return;
   if (childProcess.stdin?.writable) {
     childProcess.stdin.end();
-    return;
   }
   childProcess.kill('SIGTERM');
 }
@@ -235,8 +240,8 @@ async function cleanupRoom(roomId) {
   stopProcess(s.audioBridge);
 
   const cleanupPromise = (async () => {
-    if (s.sourceModuleId) await spawnPactl(['unload-module', s.sourceModuleId]);
-    if (s.sinkModuleId) await spawnPactl(['unload-module', s.sinkModuleId]);
+    if (s.sourceModuleId) await pactlRunner(['unload-module', s.sourceModuleId]);
+    if (s.sinkModuleId) await pactlRunner(['unload-module', s.sinkModuleId]);
     console.log(`[BMS] Virtual mic unloaded (modules ${s.sinkModuleId}, ${s.sourceModuleId || 'none'})`);
   })();
   const trackedCleanup = cleanupPromise.finally(() => {
@@ -247,4 +252,29 @@ async function cleanupRoom(roomId) {
   return trackedCleanup;
 }
 
-module.exports = { initRoom, feedAudio, cleanupRoom };
+async function cleanupAllRooms() {
+  const roomIds = Array.from(new Set([
+    ...Object.keys(sessions),
+    ...initializingRooms.keys(),
+    ...cleaningRooms.keys(),
+  ]));
+  if (roomIds.length === 0) return;
+
+  const cleanups = roomIds.map(async (roomId) => {
+    const pendingInit = initializingRooms.get(roomId);
+    if (pendingInit) {
+      advanceRoomGeneration(roomId);
+      await pendingInit.catch(() => {});
+    }
+    return cleanupRoom(roomId);
+  });
+  await Promise.all(cleanups);
+}
+
+module.exports = {
+  initRoom,
+  feedAudio,
+  cleanupRoom,
+  cleanupAllRooms,
+  setPactlRunnerForTest,
+};

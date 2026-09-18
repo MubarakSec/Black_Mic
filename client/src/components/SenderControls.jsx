@@ -1,6 +1,7 @@
 import { PROFILE_RAW, PROFILE_CLEAN, PROFILE_FAN, PROFILE_CALL, CHANNEL_MODE_MONO, CHANNEL_MODE_STEREO } from '../constants';
 import BlackoutControl from './BlackoutControl';
 import FanNoiseControls from './FanNoiseControls';
+import HardwareMicSelector from './HardwareMicSelector';
 
 const PROFILE_LABELS = {
   [PROFILE_RAW]:   'RAW — No browser DSP, no Android filters',
@@ -37,6 +38,10 @@ export default function SenderControls({
   setChannelMode,
   audioProfile,
   setAudioProfile,
+  availableMics = [],
+  selectedDeviceId = '',
+  onSelectDevice,
+  selectedDeviceRecommendation,
   micSettings,
   isCalibrating,
   noiseFloorDb,
@@ -49,6 +54,13 @@ export default function SenderControls({
 
   return (
     <>
+      <HardwareMicSelector
+        availableMics={availableMics}
+        selectedDeviceId={selectedDeviceId}
+        onSelectDevice={onSelectDevice}
+        selectedDeviceRecommendation={selectedDeviceRecommendation}
+      />
+
       <div className="slider-container">
         <div className="slider-label">
           <label htmlFor="microphone-input-gain">Microphone Input Gain</label>

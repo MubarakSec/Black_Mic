@@ -29,6 +29,8 @@ import {
   PROFILE_CALL,
 } from '../constants';
 import { getAudioSetupError } from '../utils/getAudioSetupError';
+import { createAudioKeepalive } from '../utils/audioKeepalive';
+import { playAlarmBeep, playUnlockBeep } from '../utils/audioCues';
 
 const MILLISECONDS_PER_SECOND = 1000;
 const VISUALIZER_FRAME_INTERVAL_MS = MILLISECONDS_PER_SECOND / VISUALIZER_FPS;
@@ -44,7 +46,18 @@ const VISUALIZER_IDLE_COLOR = '#fff';
 const VISUALIZER_SENDER_COLOR = '#00f58c';
 const VISUALIZER_RECEIVER_COLOR = '#00d2ff';
 
-export function useAudioEngine({ role, channelMode, audioProfile, addLog, setStatus, socketRef, roomId, jitterBufferMs }) {
+export function useAudioEngine({
+  role,
+  channelMode,
+  audioProfile,
+  addLog,
+  setStatus,
+  socketRef,
+  roomId,
+  jitterBufferMs,
+  selectedDeviceId,
+  onMicStarted,
+}) {
   const MAX_INPUT_GAIN = 2.0;
   const [inputGain, setInputGain] = useState(() => {
     const stored = parseFloat(localStorage.getItem(LS_INPUT_GAIN) || '1.0');
@@ -88,6 +101,10 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
   const hasConnectedOnceRef = useRef(false);
   const hasSentFirstChunkRef = useRef(false);
   const telemetryRef = useRef({ peakDb: -100, rmsDb: -100, clippedSamples: 0 });
+  const keepaliveRef = useRef(null);
+  if (!keepaliveRef.current) {
+    keepaliveRef.current = createAudioKeepalive();
+  }
 
   // Visualizer DOM element refs for high-performance direct rendering
   const canvasRef = useRef(null);
@@ -146,8 +163,8 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
   // Alarm sound effect when signal is lost
   useEffect(() => {
     if (!isSignalLost || role !== ROLE_RECEIVER) return;
-    playAlarmBeep();
-    const alarmInterval = setInterval(playAlarmBeep, ALARM_INTERVAL_MS);
+    playAlarmBeep(audioContextRef.current);
+    const alarmInterval = setInterval(() => playAlarmBeep(audioContextRef.current), ALARM_INTERVAL_MS);
     return () => clearInterval(alarmInterval);
   }, [isSignalLost, role]);
 
@@ -185,53 +202,6 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
     document.addEventListener('visibilitychange', handleVisibility);
     return () => document.removeEventListener('visibilitychange', handleVisibility);
   }, [role, requestWakeLock]);
-
-  const playAlarmBeep = () => {
-    if (!audioContextRef.current) return;
-    try {
-      const ctx = audioContextRef.current;
-      const osc = ctx.createOscillator();
-      const gain = ctx.createGain();
-      osc.type = 'sawtooth';
-      osc.frequency.setValueAtTime(ALARM_PITCH_HZ, ctx.currentTime);
-      gain.gain.setValueAtTime(0.15, ctx.currentTime);
-      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + (ALARM_BEEP_DURATION_SEC - 0.1));
-      osc.connect(gain);
-      gain.connect(ctx.destination);
-      osc.start();
-      osc.stop(ctx.currentTime + ALARM_BEEP_DURATION_SEC);
-    } catch (e) {
-      console.error('Failed to play alarm beep:', e);
-    }
-  };
-
-  const playUnlockBeep = () => {
-    if (!audioContextRef.current) return;
-    try {
-      const ctx = audioContextRef.current;
-      const osc1 = ctx.createOscillator();
-      const gain1 = ctx.createGain();
-      osc1.frequency.setValueAtTime(UNLOCK_NOTE_1_HZ, ctx.currentTime);
-      gain1.gain.setValueAtTime(0.08, ctx.currentTime);
-      gain1.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.15);
-      osc1.connect(gain1);
-      gain1.connect(ctx.destination);
-      osc1.start();
-      osc1.stop(ctx.currentTime + 0.2);
-
-      const osc2 = ctx.createOscillator();
-      const gain2 = ctx.createGain();
-      osc2.frequency.setValueAtTime(UNLOCK_NOTE_2_HZ, ctx.currentTime + 0.1);
-      gain2.gain.setValueAtTime(0.08, ctx.currentTime + 0.1);
-      gain2.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.25);
-      osc2.connect(gain2);
-      gain2.connect(ctx.destination);
-      osc2.start();
-      osc2.stop(ctx.currentTime + 0.3);
-    } catch (e) {
-      console.error('Failed to play unlock beep:', e);
-    }
-  };
 
   const resumeAudioContext = async () => {
     if (!audioContextRef.current) return;
@@ -390,21 +360,25 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
       await requestWakeLock();
       const wantsNs = audioProfile === PROFILE_CALL;
       const wantsEc = audioProfile === PROFILE_CALL;
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
+      const audioConstraints = {
+        echoCancellation: wantsEc,
+        autoGainControl: false,
+        noiseSuppression: wantsNs,
+        latency: 0,
+        sampleRate: MICROPHONE_SAMPLE_RATE,
+        channelCount: channelMode === CHANNEL_MODE_STEREO ? CHANNEL_STEREO : CHANNEL_MONO,
+        advanced: [{
           echoCancellation: wantsEc,
           autoGainControl: false,
           noiseSuppression: wantsNs,
           latency: 0,
-          sampleRate: MICROPHONE_SAMPLE_RATE,
-          channelCount: channelMode === CHANNEL_MODE_STEREO ? CHANNEL_STEREO : CHANNEL_MONO,
-          advanced: [{
-            echoCancellation: wantsEc,
-            autoGainControl: false,
-            noiseSuppression: wantsNs,
-            latency: 0,
-          }]
-        }
+        }],
+      };
+      if (selectedDeviceId) {
+        audioConstraints.deviceId = { exact: selectedDeviceId };
+      }
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: audioConstraints,
       });
       localStreamRef.current = stream;
 
@@ -425,6 +399,10 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
 
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
       await resumeAudioContext();
+      keepaliveRef.current.start(audioContextRef.current);
+      if (typeof onMicStarted === 'function') {
+        onMicStarted();
+      }
       addLog('📡 Loading audio worklet module...');
       await audioContextRef.current.audioWorklet.addModule('/audio-processor.js');
       addLog('✅ Audio worklet module loaded!');
@@ -603,6 +581,7 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
 
   const cleanupAudio = () => {
     releaseWakeLock();
+    keepaliveRef.current?.stop();
     if (calibrationTimerRef.current) {
       clearInterval(calibrationTimerRef.current);
       calibrationTimerRef.current = null;
@@ -638,7 +617,7 @@ export function useAudioEngine({ role, channelMode, audioProfile, addLog, setSta
     if (audioContextRef.current) {
       audioContextRef.current.resume().then(() => {
         setIsAudioLocked(false);
-        playUnlockBeep();
+        playUnlockBeep(audioContextRef.current);
         addLog('🔊 Audio Context unlocked successfully!');
       }).catch(err => {
         addLog(`❌ Audio unlock failed: ${err.message}`);

@@ -34,6 +34,10 @@ export default function StudioConsole({
   setChannelMode,
   audioProfile,
   setAudioProfile,
+  availableMics,
+  selectedDeviceId,
+  onSelectDevice,
+  selectedDeviceRecommendation,
   outputVolume,
   setOutputVolume,
   jitterBufferMs,
@@ -90,6 +94,10 @@ export default function StudioConsole({
           setChannelMode={setChannelMode}
           audioProfile={audioProfile}
           setAudioProfile={setAudioProfile}
+          availableMics={availableMics}
+          selectedDeviceId={selectedDeviceId}
+          onSelectDevice={onSelectDevice}
+          selectedDeviceRecommendation={selectedDeviceRecommendation}
           micSettings={micSettings}
           isCalibrating={isCalibrating}
           noiseFloorDb={noiseFloorDb}

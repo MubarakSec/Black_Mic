@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const config = require('./server/config');
 const { createRoomRegistry } = require('./server/room-registry');
+const { createShutdownHandler } = require('./server/shutdown-handler');
 
 process.on('unhandledRejection', (reason) => {
   console.error('[BMS] Unhandled Rejection:', reason);
@@ -43,6 +44,14 @@ const io = new Server(server, {
   cors: { origin: config.corsOrigin, methods: ['GET', 'POST'] },
   maxHttpBufferSize: config.maxSocketPayloadBytes,
   transports: ['websocket'],
+});
+
+const shutdownHandler = createShutdownHandler({ server, io, recording });
+shutdownHandler.registerSignalListeners();
+
+process.on('uncaughtException', (err) => {
+  console.error('[BMS] Uncaught Exception:', err);
+  shutdownHandler.handleShutdown('uncaughtException');
 });
 
 const roomRegistry = createRoomRegistry();
