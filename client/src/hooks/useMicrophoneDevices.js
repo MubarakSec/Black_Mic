@@ -32,6 +32,9 @@ export function useMicrophoneDevices() {
   }, []);
 
   useEffect(() => {
+    // Device enumeration is an external-system sync; setState happens in a
+    // microtask after enumerateDevices resolves, not synchronously.
+    // oxlint-disable-next-line react/set-state-in-effect
     refreshDevices();
 
     if (!navigator?.mediaDevices) return;
