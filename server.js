@@ -11,6 +11,7 @@ const config = require('./server/config');
 const { createRoomRegistry } = require('./server/room-registry');
 const { createShutdownHandler } = require('./server/shutdown-handler');
 const { createUsbStatus } = require('./server/usb-status');
+const { isOriginAllowed } = require('./server/origin-check');
 const { logger } = require('./server/logger');
 
 const recording = require('./server/recording');
@@ -46,7 +47,47 @@ function isJoinRateLimited(socketId, now = Date.now()) {
 function clearJoinAttempts(socketId) {
   joinAttempts.delete(socketId);
 }
+
+const PCM_BUDGET_BYTES = 512 * 1024;
+const PCM_REFILL_BYTES_PER_SEC = 256 * 1024;
+const PCM_WARN_INTERVAL_MS = 5000;
+const pcmBuckets = new Map();
+
+function takePcmBudget(socketId, bytes, now = Date.now()) {
+  let bucket = pcmBuckets.get(socketId);
+  if (!bucket) {
+    bucket = { tokens: PCM_BUDGET_BYTES, lastRefill: now, lastWarn: 0 };
+    pcmBuckets.set(socketId, bucket);
+  }
+  const elapsedSec = (now - bucket.lastRefill) / 1000;
+  bucket.tokens = Math.min(PCM_BUDGET_BYTES, bucket.tokens + (elapsedSec * PCM_REFILL_BYTES_PER_SEC));
+  bucket.lastRefill = now;
+  if (bucket.tokens < bytes) {
+    if (now - bucket.lastWarn >= PCM_WARN_INTERVAL_MS) {
+      logger.warn(`PCM flood from ${socketId}; dropping packets (${bucket.tokens.toFixed(0)} B budget left)`);
+      bucket.lastWarn = now;
+    }
+    return false;
+  }
+  bucket.tokens -= bytes;
+  return true;
+}
+
+function clearPcmBudget(socketId) {
+  pcmBuckets.delete(socketId);
+}
 app.use(cors({ origin: config.corsOrigin }));
+
+// Security headers for the SPA and API responses
+app.use((_req, res, next) => {
+  res.setHeader('Content-Security-Policy',
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
+    "img-src 'self' data: blob:; media-src 'self' blob:; " +
+    "connect-src 'self' ws: wss:");
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'DENY');
+  next();
+});
 app.use(express.static(path.join(__dirname, 'client/dist')));
 
 // HTTPS if certs exist, HTTP otherwise
@@ -60,6 +101,14 @@ const server = useHttps
 
 const io = new Server(server, {
   cors: { origin: config.corsOrigin, methods: ['GET', 'POST'] },
+  allowRequest: (req, callback) => {
+    const origin = req.headers.origin;
+    const allowed = isOriginAllowed(origin, req.headers.host, config.corsOrigin);
+    if (!allowed) {
+      logger.warn(`Rejected socket handshake from origin: ${origin}`);
+    }
+    callback(null, allowed);
+  },
   maxHttpBufferSize: config.maxSocketPayloadBytes,
   transports: ['websocket'],
 });
@@ -92,10 +141,11 @@ app.get('/healthz', (_req, res) => {
 app.get('/usb-status', async (_req, res) => {
   res.set('Cache-Control', 'no-store');
   try {
-    res.json(await usbStatus.getStatus());
+    const { devices, ...rest } = await usbStatus.getStatus();
+    res.json({ ...rest, devicesCount: devices.length });
   } catch (err) {
     logger.error('usb-status failed:', err.message);
-    res.status(500).json({ available: false, state: 'missing', devices: [], ready: false });
+    res.status(500).json({ available: false, state: 'missing', devicesCount: 0, ready: false });
   }
 });
 
@@ -109,7 +159,9 @@ function warnSocket(socket, message) {
 
 function cleanupRoomIfEmpty(roomId) {
   if (roomRegistry.hasRoomMembers(roomId)) return;
-  recording.cleanupRoom(roomId);
+  recording.cleanupRoom(roomId).catch(err => {
+    logger.error('cleanupRoom failed:', err);
+  });
 }
 
 function getSocketRoom(socket) {
@@ -219,6 +271,7 @@ io.on('connection', (socket) => {
   socket.on('receiver-ready', (roomId) => {
     if (!isValidRoomId(roomId)) return;
     if (!isSocketInRoom(socket, roomId)) return;
+    if (getSocketRoom(socket)?.role !== 'receiver') return;
     socket.to(roomId).emit('receiver-ready');
   });
 
@@ -228,6 +281,7 @@ io.on('connection', (socket) => {
     if (getSocketRoom(socket)?.role !== 'sender') return;
     const pcmChunk = normalizePcmChunk(chunk);
     if (!pcmChunk) return;
+    if (!takePcmBudget(socket.id, pcmChunk.buffer.length)) return;
 
     // Relay only the validated PCM payload (reconstructed with header for receiver parsing)
     const relayBuf = Buffer.allocUnsafe(HEADER_BYTE_LENGTH + pcmChunk.buffer.length);
@@ -267,6 +321,7 @@ io.on('connection', (socket) => {
   socket.on('disconnect', () => {
     logger.info('Client disconnected:', socket.id);
     clearJoinAttempts(socket.id);
+    clearPcmBudget(socket.id);
     leaveCurrentRoom(socket);
   });
 });
@@ -281,6 +336,5 @@ server.on('error', (error) => {
 });
 
 server.listen(config.port, config.host, () => {
-  const bindHost = config.host || '0.0.0.0';
-  logger.info(`Black Mic Studio server on ${useHttps ? 'HTTPS' : 'HTTP'}://${bindHost}:${config.port}`);
+  logger.info(`Black Mic Studio server on ${useHttps ? 'HTTPS' : 'HTTP'}://${config.host}:${config.port}`);
 });

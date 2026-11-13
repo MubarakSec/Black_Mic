@@ -1,6 +1,7 @@
 'use strict';
 
 const DEFAULT_PORT = 3001;
+const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_MAX_SOCKET_PAYLOAD_MB = 1;
 const PRODUCTION_ENV = 'production';
 
@@ -48,6 +49,6 @@ function readPositiveInteger(value, fallback) {
 module.exports = {
   corsOrigin: readAllowedOrigins(process.env.BMS_ALLOWED_ORIGINS, process.env.NODE_ENV),
   port: readPositiveInteger(process.env.PORT, DEFAULT_PORT),
-  host: readHost(process.env.BMS_HOST),
+  host: readHost(process.env.BMS_HOST) || DEFAULT_HOST,
   maxSocketPayloadBytes: readPositiveNumber(process.env.BMS_MAX_SOCKET_PAYLOAD_MB, DEFAULT_MAX_SOCKET_PAYLOAD_MB) * 1024 * 1024,
 };

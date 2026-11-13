@@ -34,7 +34,9 @@ function createShutdownHandler({
 
     try {
       if (io && typeof io.close === 'function') {
-        io.close();
+        // socket.io's close() also closes the attached HTTP server and
+        // disconnects all clients; awaiting it ensures disconnect handlers run
+        await io.close();
       }
       if (server && server.listening) {
         await new Promise((resolve) => server.close(resolve));

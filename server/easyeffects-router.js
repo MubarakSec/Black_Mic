@@ -23,11 +23,25 @@ function buildEasyEffectsRouteCommands(sourceNodeName) {
   });
 }
 
+const PW_LINK_TIMEOUT_MS = 3000;
+
 function runPwLink(args) {
   return new Promise((resolve) => {
-    const process = spawn('pw-link', args, { stdio: 'ignore' });
-    process.on('close', code => resolve(code === 0));
-    process.on('error', () => resolve(false));
+    let settled = false;
+    const childProcess = spawn('pw-link', args, { stdio: 'ignore' });
+    const finish = (ok) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      resolve(ok);
+    };
+    const timer = setTimeout(() => {
+      childProcess.kill('SIGKILL');
+      finish(false);
+    }, PW_LINK_TIMEOUT_MS);
+    if (typeof timer.unref === 'function') timer.unref();
+    childProcess.on('close', code => finish(code === 0));
+    childProcess.on('error', () => finish(false));
   });
 }
 
