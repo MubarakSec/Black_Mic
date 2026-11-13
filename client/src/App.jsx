@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import AudioLockOverlay from './components/AudioLockOverlay';
+import InsecureContextBanner from './components/InsecureContextBanner';
 import RoomSelector from './components/RoomSelector';
 import SignalLostOverlay from './components/SignalLostOverlay';
 import StudioConsole from './components/StudioConsole';
@@ -272,6 +273,7 @@ function App() {
   if (!role) {
     return (
       <div className="container">
+        <InsecureContextBanner />
         <RoomSelector 
           roomId={roomId} 
           setRoomId={setRoomId} 
@@ -286,6 +288,7 @@ function App() {
 
   return (
     <div className="container">
+      <InsecureContextBanner />
       {isSignalLost && <SignalLostOverlay />}
       {isAudioLocked && !isSignalLost && <AudioLockOverlay onUnlock={unlockAudio} />}
       <StudioConsole
