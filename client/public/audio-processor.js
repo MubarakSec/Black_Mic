@@ -17,8 +17,16 @@ function clampSample(sample) {
   return sample;
 }
 
+const PCM_LSB = 1 / 0x8000;
+
+// Triangular PDF dither over ±1 LSB, mean 0 — decorrelates quantization error
+// from the signal for a noise floor that is smooth instead of gritty.
+function tpdfDither(rng = Math.random) {
+  return (rng() - rng()) * PCM_LSB;
+}
+
 function floatToInt16(sample) {
-  const clamped = clampSample(sample);
+  const clamped = clampSample(sample + tpdfDither());
   return clamped < 0 ? clamped * PCM_NEGATIVE_SCALE : clamped * PCM_POSITIVE_SCALE;
 }
 
@@ -82,13 +90,15 @@ class AudioProcessor extends AudioWorkletProcessor {
     return MIN_REDUCTION_GAIN + (smoothPosition * (1 - MIN_REDUCTION_GAIN));
   }
 
-  applySmoothedReduction(sample, targetGain) {
+  // Advance the shared gain envelope by one sample. Call exactly once per
+  // sample frame; apply the returned gain to every channel of that frame.
+  smoothGain(targetGain, frameCount = 1) {
     const timeConstant = targetGain > this.reductionGain
       ? REDUCTION_ATTACK_SEC
       : REDUCTION_RELEASE_SEC;
-    const coefficient = 1 - Math.exp(-1 / (this.contextSampleRate * timeConstant));
+    const coefficient = 1 - Math.exp(-frameCount / (this.contextSampleRate * timeConstant));
     this.reductionGain += (targetGain - this.reductionGain) * coefficient;
-    return sample * this.reductionGain;
+    return this.reductionGain;
   }
 
   getBufferFromPool() {
@@ -117,8 +127,9 @@ class AudioProcessor extends AudioWorkletProcessor {
       const stereoInput1 = input[1];
       for (let i = 0; i < channelLength; i++) {
         const offset = (this.frameOffset + i) * 2;
-        const sample = this.applySmoothedReduction(monoInput[i], reductionTarget);
-        const stereoSample = stereoInput1[i] * this.reductionGain;
+        const gain = this.smoothGain(reductionTarget);
+        const sample = monoInput[i] * gain;
+        const stereoSample = stereoInput1[i] * gain;
         this.currentInt16Array[offset] = floatToInt16(sample);
         this.currentInt16Array[offset + 1] = floatToInt16(stereoSample);
         const abs = Math.abs(sample);
@@ -128,7 +139,8 @@ class AudioProcessor extends AudioWorkletProcessor {
       }
     } else {
       for (let i = 0; i < channelLength; i++) {
-        const sample = this.applySmoothedReduction(monoInput[i], reductionTarget);
+        const gain = this.smoothGain(reductionTarget);
+        const sample = monoInput[i] * gain;
         this.currentInt16Array[this.frameOffset + i] = floatToInt16(sample);
         const abs = Math.abs(sample);
         if (abs > this.peak) this.peak = abs;
