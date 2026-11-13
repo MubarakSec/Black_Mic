@@ -184,6 +184,7 @@ function App() {
     isAudioRecording, recordings, recordingSeconds,
     startAudioOnlyRecording, stopAudioOnlyRecording,
     finalizeRecordingForDisconnect,
+    exportRecordingAsWav,
     clearRecordings,
   } = useRecording({ destRef, addLog });
 
@@ -343,6 +344,7 @@ function App() {
         onCalibrateNoise={startNoiseCalibration}
         onToggleNoiseReduction={toggleNoiseReduction}
         onSetNoiseFloor={setManualNoiseFloor}
+        onExportRecording={exportRecordingAsWav}
         onStartAudioRecording={startAudioOnlyRecording}
         onStopAudioRecording={stopAudioOnlyRecording}
         onDisconnect={handleDisconnect}

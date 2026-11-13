@@ -59,6 +59,7 @@ export default function StudioConsole({
   onCalibrateNoise,
   onToggleNoiseReduction,
   onSetNoiseFloor,
+  onExportRecording,
   onStartAudioRecording,
   onStopAudioRecording,
   onDisconnect,
@@ -131,7 +132,7 @@ export default function StudioConsole({
       )}
 
       <LoggerPanel logs={logs} />
-      {isReceiver && recordings.length > 0 && <RecordingLibrary recordings={recordings} />}
+      {isReceiver && recordings.length > 0 && <RecordingLibrary recordings={recordings} onExportWav={onExportRecording} />}
 
       <button className="btn-danger mt-8 disconnect-button" onClick={onDisconnect}>
         <RefreshCw size={14} /> Disconnect / Restart

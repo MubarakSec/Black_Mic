@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from 'react';
+import { audioBufferToWav } from '../utils/wavEncoder';
 
 /**
  * Manages all recording state and logic.
@@ -97,6 +98,36 @@ export function useRecording({ destRef, addLog }) {
     setRecordingSeconds(0);
   }, [clearRecordingTimer]);
 
+  const exportRecordingAsWav = useCallback(async (recording) => {
+    if (!recording?.url) return;
+    try {
+      const response = await fetch(recording.url);
+      const recorded = await response.arrayBuffer();
+      const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioContextCtor) {
+        addLog('❌ WAV export needs Web Audio support.');
+        return;
+      }
+      const audioContext = new AudioContextCtor();
+      try {
+        const decoded = await audioContext.decodeAudioData(recorded);
+        const wav = audioBufferToWav(decoded);
+        const blob = new Blob([wav], { type: 'audio/wav' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${recording.filename}.wav`;
+        a.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        addLog('🎚️ Lossless WAV exported.');
+      } finally {
+        audioContext.close().catch(() => {});
+      }
+    } catch (err) {
+      addLog(`❌ WAV export failed: ${err.message}`);
+    }
+  }, [addLog]);
+
   const clearRecordings = useCallback(() => {
     setRecordings(prev => {
       prev.forEach(rec => URL.revokeObjectURL(rec.url));
@@ -108,6 +139,7 @@ export function useRecording({ destRef, addLog }) {
     isAudioRecording, recordings, recordingSeconds,
     startAudioOnlyRecording, stopAudioOnlyRecording,
     finalizeRecordingForDisconnect,
+    exportRecordingAsWav,
     clearRecordings,
   };
 }
