@@ -150,16 +150,16 @@ function App() {
     isSenderAudioReady: Boolean(micSettings),
   });
 
-  // Share the actual socketRef from useSocketConnection with useAudioEngine
-  const audioContextRefSynced = useRef(false);
+  // Restart the sender pipeline when channel mode, profile, or mic device changes.
+  // First render is skipped so we don't immediately restart a freshly-started sender.
+  const senderRestartGuardRef = useRef(false);
   useEffect(() => {
-    // Dynamic binding to restart sender if channel mode, profile, or mic changes
-    if (role === ROLE_SENDER && audioContextRefSynced.current) {
-      addLog(`🔄 Settings changed. Restarting mic stream...`);
+    if (role === ROLE_SENDER && senderRestartGuardRef.current) {
+      addLog('🔄 Settings changed. Restarting mic stream...');
       cleanupAudio();
       startSender();
     }
-    audioContextRefSynced.current = true;
+    senderRestartGuardRef.current = true;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [channelMode, audioProfile, selectedDeviceId]);
 
