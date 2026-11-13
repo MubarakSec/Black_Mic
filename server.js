@@ -12,9 +12,6 @@ const { createRoomRegistry } = require('./server/room-registry');
 const { createShutdownHandler } = require('./server/shutdown-handler');
 const { logger } = require('./server/logger');
 
-process.on('unhandledRejection', (reason) => {
-  logger.error('Unhandled Rejection:', reason);
-});
 const recording = require('./server/recording');
 const {
   isValidRemoteCommand,
@@ -50,6 +47,10 @@ const io = new Server(server, {
 const shutdownHandler = createShutdownHandler({ server, io, recording });
 shutdownHandler.registerSignalListeners();
 
+process.on('unhandledRejection', (reason) => {
+  logger.error('Unhandled Rejection:', reason);
+  shutdownHandler.handleShutdown('unhandledRejection');
+});
 process.on('uncaughtException', (err) => {
   logger.error('Uncaught Exception:', err);
   shutdownHandler.handleShutdown('uncaughtException');
