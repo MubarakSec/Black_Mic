@@ -15,11 +15,6 @@ function clampSample(sample) {
   return sample;
 }
 
-function getOutputFrameCount(inputFrames, inputSampleRate, outputSampleRate) {
-  if (inputSampleRate === outputSampleRate) return inputFrames;
-  return Math.max(1, Math.round((inputFrames * outputSampleRate) / inputSampleRate));
-}
-
 function interpolate(y1, y2, fraction) {
   return y1 + (y2 - y1) * fraction;
 }
@@ -49,6 +44,9 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
     this.underrunsAtLastAdapt = 0;
     this.framesSinceAdapt = 0;
     this.adaptFrameBudget = Math.round((this.sampleRate * ADAPT_INTERVAL_MS) / MS_PER_SECOND);
+    // Fractional resampling position carried across PCM batches so the
+    // long-term output rate exactly matches the device rate ratio.
+    this.resampleCarry = 0;
 
     this.port.onmessage = (event) => {
       const message = event.data;
@@ -57,13 +55,17 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
         return;
       }
       if (message?.type === 'set-target-buffer') {
-        const ms = Math.min(message.targetBufferMs, MAX_BUFFER_MS);
+        const ms = message.targetBufferMs;
+        if (!Number.isFinite(ms) || ms < 0 || ms > MAX_BUFFER_MS) return;
         this.userTargetBufferMs = ms;
         this.autoTargetBufferMs = ms;
         this.targetBufferFrames = Math.round((this.sampleRate * ms) / MS_PER_SECOND);
         return;
       }
       if (message?.type !== 'pcm') return;
+      const { buffer, sampleRate: inputSampleRate, channelCount } = message;
+      if (!Number.isFinite(inputSampleRate) || inputSampleRate < 8000 || inputSampleRate > 96000) return;
+      if (channelCount !== 1 && channelCount !== 2) return;
       this.enqueuePcm(message);
     };
   }
@@ -72,6 +74,7 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
     this.readIndex = 0;
     this.writeIndex = 0;
     this.hasStarted = false;
+    this.resampleCarry = 0;
     this.underrunsAtLastAdapt = this.underruns;
     this.framesSinceAdapt = 0;
   }
@@ -109,11 +112,15 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
     try {
       const pcm = new Int16Array(buffer);
       const inputFrames = Math.floor(pcm.length / channelCount);
-      const outputFrames = getOutputFrameCount(inputFrames, inputSampleRate, sampleRate);
-      
+      if (inputFrames <= 0) return;
+      const isSameRate = inputSampleRate === this.sampleRate;
+      const estimatedOutputFrames = isSameRate
+        ? inputFrames
+        : Math.ceil(inputFrames * (this.sampleRate / inputSampleRate));
+
       // Prevent overflow: if new frames push us past max capacity, drop the oldest frames
       const currentBuffered = this.getBufferedFrames();
-      const overflow = (currentBuffered + outputFrames) - this.maxBufferFrames;
+      const overflow = (currentBuffered + estimatedOutputFrames) - this.maxBufferFrames;
       if (overflow > 0) {
         this.readIndex = (this.readIndex + overflow) % this.ringBufferSize;
       }
@@ -134,13 +141,13 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
         return;
       }
 
-      const ratio = inputFrames / outputFrames;
+      const inputPerOutput = inputSampleRate / this.sampleRate;
+      let position = this.resampleCarry;
 
-      for (let i = 0; i < outputFrames; i++) {
-        const exactIndex = i * ratio;
-        const indexLow = Math.floor(exactIndex);
+      while (position < inputFrames) {
+        const indexLow = Math.floor(position);
         const indexHigh = Math.min(inputFrames - 1, indexLow + 1);
-        const fraction = exactIndex - indexLow;
+        const fraction = position - indexLow;
 
         // Perform linear interpolation resampling for premium rate translation
         const leftSample1 = pcm[indexLow * channelCount] / PCM_SAMPLE_SCALE;
@@ -161,7 +168,9 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
         this.ringBufferR[this.writeIndex] = clampSample(rightSample);
         this.writeIndex += 1;
         if (this.writeIndex === this.ringBufferSize) this.writeIndex = 0;
+        position += inputPerOutput;
       }
+      this.resampleCarry = position - inputFrames;
     } catch (e) {
       console.error('[BMS Worklet] Error during enqueuePcm ring buffer write:', e.message);
     }

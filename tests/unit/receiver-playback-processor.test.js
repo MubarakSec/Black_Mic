@@ -55,6 +55,38 @@ function renderFirstFrame(processor) {
   return { left: left[0], right: right[0] };
 }
 
+describe('ReceiverPlaybackProcessor input validation', () => {
+  it('ignores non-finite set-target-buffer values', () => {
+    const processor = createProcessor();
+    processor.port.onmessage({ data: { type: 'set-target-buffer', targetBufferMs: NaN } });
+    processor.port.onmessage({ data: { type: 'set-target-buffer', targetBufferMs: -5 } });
+    expect(Number.isFinite(processor.targetBufferFrames)).toBe(true);
+    expect(processor.targetBufferFrames).toBeGreaterThanOrEqual(0);
+  });
+
+  it('rejects pcm messages with channelCount other than 1 or 2', () => {
+    const processor = createProcessor();
+    const buffer = new Int16Array(QUANTUM_FRAMES).fill(PCM_POSITIVE_HALF).buffer;
+
+    expect(() => {
+      processor.port.onmessage({
+        data: { type: 'pcm', buffer, sampleRate: TEST_SAMPLE_RATE, channelCount: 0 },
+      });
+    }).not.toThrow();
+    expect(processor.writeIndex).toBe(0);
+  });
+
+  it('rejects pcm messages with out-of-range sample rates', () => {
+    const processor = createProcessor();
+    const buffer = new Int16Array(QUANTUM_FRAMES).fill(PCM_POSITIVE_HALF).buffer;
+
+    processor.port.onmessage({
+      data: { type: 'pcm', buffer, sampleRate: 0, channelCount: 1 },
+    });
+    expect(processor.writeIndex).toBe(0);
+  });
+});
+
 describe('ReceiverPlaybackProcessor', () => {
   it('duplicates mono PCM into both output channels', () => {
     const processor = createProcessor();
