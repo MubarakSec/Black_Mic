@@ -8,6 +8,7 @@ import { useAudioEngine } from './hooks/useAudioEngine';
 import { useMicrophoneDevices } from './hooks/useMicrophoneDevices';
 import { useSocketConnection } from './hooks/useSocketConnection';
 import { isValidRoomId } from './utils/socketValidation';
+import { readClampedNumber } from './utils/storage';
 import {
   DEFAULT_ROOM_ID,
   LS_ROOM_ID,
@@ -15,6 +16,8 @@ import {
   LS_AUDIO_PROFILE,
   LS_RECEIVER_BUFFER_MS,
   DEFAULT_RECEIVER_BUFFER_MS,
+  MIN_JITTER_BUFFER_MS,
+  MAX_JITTER_BUFFER_MS,
   ROLE_SENDER,
   ROLE_RECEIVER,
   CHANNEL_MODE_MONO,
@@ -29,8 +32,13 @@ function App() {
   const [channelMode, setChannelMode] = useState(() => localStorage.getItem(LS_CHANNEL_MODE) || CHANNEL_MODE_MONO);
   const [audioProfile, setAudioProfile] = useState(() => localStorage.getItem(LS_AUDIO_PROFILE) || PROFILE_RAW);
   const [jitterBufferMs, setJitterBufferMs] = useState(() => {
-    const stored = parseInt(localStorage.getItem(LS_RECEIVER_BUFFER_MS), 10);
-    return Number.isFinite(stored) ? stored : DEFAULT_RECEIVER_BUFFER_MS;
+    return readClampedNumber(
+      LS_RECEIVER_BUFFER_MS,
+      DEFAULT_RECEIVER_BUFFER_MS,
+      MIN_JITTER_BUFFER_MS,
+      MAX_JITTER_BUFFER_MS,
+      (value) => Number.parseInt(value, 10),
+    );
   });
   const [logs, setLogs] = useState([]);
   const [status, setStatus] = useState('Waiting to connect...');
