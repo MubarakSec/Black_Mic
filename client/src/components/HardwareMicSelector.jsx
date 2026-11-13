@@ -11,7 +11,7 @@ export default function HardwareMicSelector({
   return (
     <div className="channel-mode-row" style={{ flexDirection: 'column', alignItems: 'stretch', gap: '0.4rem', marginTop: '0.6rem' }}>
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '0.85rem' }}>
-        <span>Hardware Microphone</span>
+        <label htmlFor="microphone-device-select">Hardware Microphone</label>
         {selectedDeviceRecommendation?.badge && (
           <span style={{ fontSize: '0.75rem', color: selectedDeviceRecommendation.isRecommended ? '#00f58c' : '#ffb84d', fontWeight: 'bold' }}>
             {selectedDeviceRecommendation.badge}
@@ -20,6 +20,7 @@ export default function HardwareMicSelector({
       </div>
       <select
         id="microphone-device-select"
+        aria-label="Hardware microphone"
         value={selectedDeviceId || ''}
         onChange={(e) => onSelectDevice?.(e.target.value)}
         className="slider-input"

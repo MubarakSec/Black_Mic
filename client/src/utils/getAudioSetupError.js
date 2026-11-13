@@ -4,6 +4,7 @@ const AUDIO_ERROR_MESSAGES = {
   NotReadableError: 'The microphone is busy in another app. Close that app, then try again.',
   SecurityError: 'Microphone access requires HTTPS or localhost.',
   AbortError: 'Microphone startup was interrupted. Please try again.',
+  OverconstrainedError: 'The selected microphone is not available. Re-pick one from the Hardware Microphone list.',
 };
 
 const DEFAULT_AUDIO_ERROR_MESSAGE = 'The audio engine could not start. Check the device connection and try again.';

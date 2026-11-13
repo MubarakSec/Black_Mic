@@ -26,12 +26,14 @@ export function useUsbStatus() {
             available: data?.available === true,
             state,
             ready: data?.ready === true,
-            devices: Array.isArray(data?.devices) ? data.devices : [],
+            devicesCount: Number.isInteger(data?.devicesCount)
+              ? data.devicesCount
+              : (Array.isArray(data?.devices) ? data.devices.length : 0),
           });
         }
       } catch {
         if (!cancelled) {
-          setUsbStatus({ available: false, state: 'missing', ready: false, devices: [] });
+          setUsbStatus({ available: false, state: 'missing', ready: false, devicesCount: 0 });
         }
       } finally {
         if (!cancelled) timer = setTimeout(poll, USB_POLL_INTERVAL_MS);

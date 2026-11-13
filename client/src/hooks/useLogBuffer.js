@@ -1,4 +1,4 @@
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useRef } from 'react';
 
 const MAX_LOG_ENTRIES = 7;
 
@@ -8,10 +8,11 @@ const MAX_LOG_ENTRIES = 7;
  */
 export function useLogBuffer(maxEntries = MAX_LOG_ENTRIES) {
   const [logs, setLogs] = useState([]);
+  const nextIdRef = useRef(0);
 
   const addLog = useCallback((msg) => {
     console.log(msg);
-    setLogs((prev) => [...prev.slice(-(maxEntries - 1)), msg]);
+    setLogs((prev) => [...prev.slice(-(maxEntries - 1)), { id: nextIdRef.current++, msg }]);
   }, [maxEntries]);
 
   return { logs, addLog };

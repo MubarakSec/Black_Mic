@@ -1,5 +1,6 @@
 import React from 'react';
 import { Mic, Square } from 'lucide-react';
+import { MIN_JITTER_BUFFER_MS, MAX_JITTER_BUFFER_MS } from '../constants';
 import RemoteControlPanel from './RemoteControlPanel';
 
 function formatTime(seconds) {
@@ -36,8 +37,8 @@ export default function ReceiverControls({
         <input
           id="receiver-jitter-buffer"
           type="range"
-          min="10"
-          max="150"
+          min={MIN_JITTER_BUFFER_MS}
+          max={MAX_JITTER_BUFFER_MS}
           step="5"
           value={jitterBufferMs}
           onChange={(e) => setJitterBufferMs(parseInt(e.target.value, 10))}

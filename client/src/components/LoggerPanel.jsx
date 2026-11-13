@@ -6,7 +6,7 @@ export default function LoggerPanel({ logs }) {
       <div className="telemetry-header">SYSTEM TELEMETRY LOG</div>
       <div className="telemetry-content">
         {logs.length === 0 && <div className="telemetry-empty">No telemetry events logged yet.</div>}
-        {logs.map((log, i) => <div className="telemetry-line" key={i}>{log}</div>)}
+        {logs.map((log) => <div className="telemetry-line" key={log.id}>{log.msg}</div>)}
       </div>
     </div>
   );

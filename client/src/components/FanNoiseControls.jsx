@@ -52,6 +52,7 @@ export default function FanNoiseControls({
           <span style={{ opacity: 0.6 }}>Floor:</span>
           <input
             type="number"
+            aria-label="Noise floor in dBFS"
             value={floorInput}
             onChange={(event) => setFloorDraft(event.target.value)}
             onBlur={handleFloorBlur}
@@ -75,6 +76,7 @@ export default function FanNoiseControls({
           <span style={{ opacity: 0.5, fontSize: '0.72rem' }}>dBFS</span>
           <button
             className={`btn-control ${noiseReductionActive ? 'is-sender-active' : ''}`}
+            aria-pressed={noiseReductionActive}
             onClick={onToggleNoiseReduction}
             style={{ padding: '0.3rem 0.6rem' }}
           >
