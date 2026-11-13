@@ -50,6 +50,21 @@ if [ -f "$PID_FILE" ]; then
   rm -f "$PID_FILE"
 fi
 
+# ---- Preflight dependency check ----------------------------
+if ! command -v node > /dev/null 2>&1; then
+  echo "[BMS] ERROR: node is not installed or not on PATH."
+  notify "❌ Node.js is required — https://nodejs.org"
+  exit 1
+fi
+if ! command -v pactl > /dev/null 2>&1; then
+  echo "[BMS] ERROR: pactl not found. Install PulseAudio/PipeWire-pulse utilities (e.g. 'sudo apt install pulseaudio-utils')."
+  notify "❌ pactl missing — install pulseaudio-utils"
+  exit 1
+fi
+if ! command -v pw-link > /dev/null 2>&1; then
+  echo "[BMS] Warning: pw-link not found — EasyEffects auto-routing will be unavailable."
+fi
+
 # ---- Clean up old virtual sinks if any ---------------------
 echo "[BMS] Cleaning up old virtual audio sinks..."
 pactl list short modules 2>/dev/null | grep "BMS_" | awk '{print $1}' | while read -r mod_id; do
