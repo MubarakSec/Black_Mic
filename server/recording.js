@@ -10,6 +10,7 @@ const { PCM_BYTES_PER_SAMPLE, MONO_CHANNEL_COUNT, ROOM_ID_REGEX } = require('./p
 const MONO_CHANNEL_MAP = 'mono';
 const AUDIO_WORKLET_BATCH_FRAMES = 512;
 const PCM_FLUSH_THRESHOLD_BYTES = AUDIO_WORKLET_BATCH_FRAMES * PCM_BYTES_PER_SAMPLE;
+const PACAT_RESPAWN_COOLDOWN_MS = 1000;
 const DEFAULT_EASYEFFECTS_ROOM_ID = 'ROOM';
 const rawEasyEffectsRoom = process.env.BMS_EASYEFFECTS_ROOM || DEFAULT_EASYEFFECTS_ROOM_ID;
 const EASYEFFECTS_ROOM_ID = ROOM_ID_REGEX.test(rawEasyEffectsRoom)
@@ -43,14 +44,26 @@ function advanceRoomGeneration(roomId) {
 // Virtual PipeWire sink helpers
 // ---------------------------------------------------------------------------
 
-function spawnPactl(args) {
+const SPAWN_TIMEOUT_MS = 3000;
+
+function spawnWithTimeout(command, args, { stdinPipe = false } = {}) {
   return new Promise((resolve) => {
     let out = '';
-    const p = spawn('pactl', args);
-    p.stdout.on('data', d => (out += d));
-    p.on('close', code => resolve({ code, out: out.trim() }));
-    p.on('error', () => resolve({ code: -1, out: '' }));
+    const p = stdinPipe ? spawn(command, args, { stdio: ['pipe', 'ignore', 'ignore'] }) : spawn(command, args);
+    const timer = setTimeout(() => {
+      logger.warn(`${command} timed out after ${SPAWN_TIMEOUT_MS}ms; killing`);
+      p.kill('SIGKILL');
+      resolve({ code: -2, out: '' });
+    }, SPAWN_TIMEOUT_MS);
+    if (typeof timer.unref === 'function') timer.unref();
+    if (p.stdout) p.stdout.on('data', d => (out += d));
+    p.on('close', code => { clearTimeout(timer); resolve({ code, out: out.trim() }); });
+    p.on('error', () => { clearTimeout(timer); resolve({ code: -1, out: '' }); });
   });
+}
+
+function spawnPactl(args) {
+  return spawnWithTimeout('pactl', args);
 }
 
 let pactlRunner = spawnPactl;
@@ -127,6 +140,18 @@ async function initRoom(roomId) {
       const routed = await routeEasyEffects(sourceName);
       const routeStatus = routed ? 'connected' : 'not available';
       logger.info(`EasyEffects route ${routeStatus}: ${sourceName}`);
+      // Receiver may have left while we were routing; the generation guard
+      // above ran before `sessions[roomId]` was assigned, so re-check now.
+      if (generation !== getRoomGeneration(roomId)) {
+        delete sessions[roomId];
+        await pactlRunner(['unload-module', sourceModuleId]);
+        await pactlRunner(['unload-module', sinkModuleId]);
+        return {
+          ok: false,
+          cancelled: true,
+          message: `Receiver left room ${roomId} before virtual microphone setup completed.`,
+        };
+      }
     }
     logger.info(`Virtual mic ready: Black Mic (modules ${sinkModuleId}, ${sourceModuleId || 'none'})`);
     return { ok: true };
@@ -162,6 +187,12 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
     s.audioBridge = null;
   }
 
+  if (!s.audioBridge && s.lastPacatFailureAt && (Date.now() - s.lastPacatFailureAt) < PACAT_RESPAWN_COOLDOWN_MS) {
+    // Cooldown after a dead pacat: drop audio instead of fork-bombing
+    s.pcmBufferQueue = [];
+    s.pcmBufferBytes = 0;
+    return;
+  }
   if (!s.audioBridge) {
     s.sampleRate = sampleRate;
     s.channelCount = channelCount;
@@ -177,8 +208,10 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
     ], { stdio: ['pipe', 'ignore', 'ignore'] });
     s.audioBridge = audioBridge;
     s.isDraining = false;
+    audioBridge.on('spawn', () => { s.lastPacatFailureAt = 0; });
     audioBridge.on('error', e => {
       logger.error('Audio bridge error:', e.message);
+      s.lastPacatFailureAt = Date.now();
       if (s.audioBridge === audioBridge) resetBridgeState(s, audioBridge);
     });
     audioBridge.stdin.on('error', err => {
@@ -193,8 +226,9 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
       if (s.audioBridge !== audioBridge) return;
       s.isDraining = false;
     });
-    audioBridge.on('close', () => {
+    audioBridge.on('close', (code) => {
       if (s.audioBridge !== audioBridge) return;
+      if (code !== 0 && code !== null) s.lastPacatFailureAt = Date.now();
       resetBridgeState(s, audioBridge);
     });
     logger.info(`pacat audio bridge: ${sampleRate}Hz mono -> ${s.sinkName}`);
@@ -227,6 +261,12 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
         logger.error('Failed to write to pacat stdin:', err.message);
         resetBridgeState(s, s.audioBridge);
       }
+      return;
+    }
+    if (s.audioBridge) {
+      // Bridge exists but its stdin is dead: reset so the next chunk respawns it
+      logger.warn(`Room ${roomId}: pacat stdin not writable; resetting bridge`);
+      resetBridgeState(s, s.audioBridge);
     }
   }
 }
@@ -252,6 +292,7 @@ async function cleanupRoom(roomId) {
   if (!s) return;
 
   delete sessions[roomId];
+  roomGenerations.delete(roomId);
   stopProcess(s.audioBridge);
 
   const cleanupPromise = (async () => {
