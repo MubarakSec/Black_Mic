@@ -28,6 +28,7 @@ import { playAlarmBeep, playUnlockBeep } from '../utils/audioCues';
 import { startVisualizerLoop } from '../utils/visualizerEngine';
 import { connectProfileInput, createPeakLimiter } from '../utils/audioProfileGraph';
 import { PCM_MAGIC, HEADER_BYTE_LENGTH } from '../utils/protocol';
+import { readClampedNumber, readStoredBoolean, writeStoredValue } from '../utils/storage';
 
 export function useAudioEngine({
   role,
@@ -41,16 +42,8 @@ export function useAudioEngine({
   selectedDeviceId,
   onMicStarted,
 }) {
-  const [inputGain, setInputGain] = useState(() => {
-    const stored = parseFloat(localStorage.getItem(LS_INPUT_GAIN) || '1.0');
-    if (!Number.isFinite(stored)) return 1.0;
-    return Math.max(GAIN_MIN, Math.min(GAIN_MAX, stored));
-  });
-  const [outputVolume, setOutputVolume] = useState(() => {
-    const stored = parseFloat(localStorage.getItem(LS_OUTPUT_VOLUME) || '1.0');
-    if (!Number.isFinite(stored)) return 1.0;
-    return Math.max(GAIN_MIN, Math.min(GAIN_MAX, stored));
-  });
+  const [inputGain, setInputGain] = useState(() => readClampedNumber(LS_INPUT_GAIN, 1.0, GAIN_MIN, GAIN_MAX));
+  const [outputVolume, setOutputVolume] = useState(() => readClampedNumber(LS_OUTPUT_VOLUME, 1.0, GAIN_MIN, GAIN_MAX));
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [underruns, setUnderruns] = useState(0);
   const [isAudioLocked, setIsAudioLocked] = useState(false);
@@ -58,14 +51,10 @@ export function useAudioEngine({
   const [micSettings, setMicSettings] = useState(null);
   const [isCalibrating, setIsCalibrating] = useState(false);
   const [noiseFloorDb, setNoiseFloorDb] = useState(() => {
-    const stored = localStorage.getItem(LS_NOISE_FLOOR);
-    const parsed = stored ? parseFloat(stored) : null;
-    if (!Number.isFinite(parsed)) return null;
-    return Math.max(MIN_NOISE_FLOOR_DB, Math.min(MAX_NOISE_FLOOR_DB, parsed));
+    const value = readClampedNumber(LS_NOISE_FLOOR, NaN, MIN_NOISE_FLOOR_DB, MAX_NOISE_FLOOR_DB);
+    return Number.isNaN(value) ? null : value;
   });
-  const [noiseReductionActive, setNoiseReductionActive] = useState(() => {
-    return localStorage.getItem(LS_NOISE_REDUCTION) === 'true';
-  });
+  const [noiseReductionActive, setNoiseReductionActive] = useState(() => readStoredBoolean(LS_NOISE_REDUCTION, false));
 
   const canvasDimsRef = useRef({ width: 0, height: 0 });
   const localStreamRef = useRef(null);
@@ -108,10 +97,10 @@ export function useAudioEngine({
   });
 
   // Persist settings
-  useEffect(() => { localStorage.setItem(LS_INPUT_GAIN, inputGain); }, [inputGain]);
-  useEffect(() => { localStorage.setItem(LS_OUTPUT_VOLUME, outputVolume); }, [outputVolume]);
-  useEffect(() => { localStorage.setItem(LS_NOISE_REDUCTION, noiseReductionActive); }, [noiseReductionActive]);
-  useEffect(() => { if (noiseFloorDb !== null) localStorage.setItem(LS_NOISE_FLOOR, noiseFloorDb); }, [noiseFloorDb]);
+  useEffect(() => { writeStoredValue(LS_INPUT_GAIN, inputGain); }, [inputGain]);
+  useEffect(() => { writeStoredValue(LS_OUTPUT_VOLUME, outputVolume); }, [outputVolume]);
+  useEffect(() => { writeStoredValue(LS_NOISE_REDUCTION, noiseReductionActive); }, [noiseReductionActive]);
+  useEffect(() => { if (noiseFloorDb !== null) writeStoredValue(LS_NOISE_FLOOR, noiseFloorDb); }, [noiseFloorDb]);
 
   useEffect(() => {
     if (!processorRef.current) return;
