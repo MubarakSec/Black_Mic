@@ -10,6 +10,7 @@ const fs = require('fs');
 const config = require('./server/config');
 const { createRoomRegistry } = require('./server/room-registry');
 const { createShutdownHandler } = require('./server/shutdown-handler');
+const { createUsbStatus } = require('./server/usb-status');
 const { logger } = require('./server/logger');
 
 const recording = require('./server/recording');
@@ -77,6 +78,8 @@ process.on('uncaughtException', (err) => {
 
 const roomRegistry = createRoomRegistry();
 
+const usbStatus = createUsbStatus();
+
 app.get('/healthz', (_req, res) => {
   res.set('Cache-Control', 'no-store');
   res.json({
@@ -84,6 +87,16 @@ app.get('/healthz', (_req, res) => {
     uptimeSec: Math.floor(process.uptime()),
     activeRooms: roomRegistry.roomCount(),
   });
+});
+
+app.get('/usb-status', async (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  try {
+    res.json(await usbStatus.getStatus());
+  } catch (err) {
+    logger.error('usb-status failed:', err.message);
+    res.status(500).json({ available: false, state: 'missing', devices: [], ready: false });
+  }
 });
 
 function emitRoomState(roomId) {
