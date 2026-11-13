@@ -6,12 +6,19 @@ const { routeEasyEffects } = require('./easyeffects-router');
 const { logger } = require('./logger');
 
 const DEFAULT_SAMPLE_RATE = 48000;
-const { PCM_BYTES_PER_SAMPLE, MONO_CHANNEL_COUNT } = require('./protocol');
+const { PCM_BYTES_PER_SAMPLE, MONO_CHANNEL_COUNT, ROOM_ID_REGEX } = require('./protocol');
 const MONO_CHANNEL_MAP = 'mono';
 const AUDIO_WORKLET_BATCH_FRAMES = 512;
 const PCM_FLUSH_THRESHOLD_BYTES = AUDIO_WORKLET_BATCH_FRAMES * PCM_BYTES_PER_SAMPLE;
 const DEFAULT_EASYEFFECTS_ROOM_ID = 'ROOM';
-const EASYEFFECTS_ROOM_ID = process.env.BMS_EASYEFFECTS_ROOM || DEFAULT_EASYEFFECTS_ROOM_ID;
+const rawEasyEffectsRoom = process.env.BMS_EASYEFFECTS_ROOM || DEFAULT_EASYEFFECTS_ROOM_ID;
+const EASYEFFECTS_ROOM_ID = ROOM_ID_REGEX.test(rawEasyEffectsRoom)
+  ? rawEasyEffectsRoom
+  : DEFAULT_EASYEFFECTS_ROOM_ID;
+
+if (rawEasyEffectsRoom !== EASYEFFECTS_ROOM_ID) {
+  logger.warn(`Invalid BMS_EASYEFFECTS_ROOM "${rawEasyEffectsRoom}"; falling back to ${DEFAULT_EASYEFFECTS_ROOM_ID}.`);
+}
 
 /**
  * Per-room session state.
