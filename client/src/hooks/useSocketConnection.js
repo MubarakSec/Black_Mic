@@ -28,6 +28,7 @@ const STATUS_MESSAGES = {
 };
 const JOIN_FAILED_MESSAGE = 'Could not join the studio room. Please try again.';
 const REMOTE_ACK_DURATION_MS = 2500;
+const GAIN_SMOOTHING_TIME_SEC = 0.01;
 
 export function useSocketConnection({
   role,
@@ -221,7 +222,8 @@ export function useSocketConnection({
         if (type === 'gain') {
           setInputGain(value);
           if (senderGainNodeRef.current) {
-            senderGainNodeRef.current.gain.value = value;
+            const now = senderGainNodeRef.current.context?.currentTime ?? 0;
+            senderGainNodeRef.current.gain.setTargetAtTime(value, now, GAIN_SMOOTHING_TIME_SEC);
           }
           addLog(`🎛️ Remote Gain set to ${Math.round(value * 100)}%`);
           socket.emit('remote-control-ack', { type: 'gain', value }, roomIdRef.current);
@@ -230,7 +232,9 @@ export function useSocketConnection({
         if (type === 'mute') {
           setIsPhoneMuted(value);
           if (senderGainNodeRef.current) {
-            senderGainNodeRef.current.gain.value = value ? 0 : inputGainRef.current;
+            const now = senderGainNodeRef.current.context?.currentTime ?? 0;
+            const target = value ? 0 : inputGainRef.current;
+            senderGainNodeRef.current.gain.setTargetAtTime(target, now, GAIN_SMOOTHING_TIME_SEC);
           }
           addLog(value ? '🔇 Remote Muted by PC' : '🔊 Remote Unmuted by PC');
           socket.emit('remote-control-ack', { type: 'mute', value }, roomIdRef.current);
