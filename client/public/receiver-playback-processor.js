@@ -8,6 +8,7 @@ const ADAPT_STEP_UP_MS = 10;
 const ADAPT_STEP_DOWN_MS = 5;
 const ADAPT_MAX_MS = 120;
 const ADAPT_SPIKE_COUNT = 3;
+const UNDRUN_POST_THROTTLE_FRAMES = 48000; // 1s at 48kHz
 
 function clampSample(sample) {
   if (sample < -1) return -1;
@@ -44,6 +45,8 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
     this.underrunsAtLastAdapt = 0;
     this.framesSinceAdapt = 0;
     this.adaptFrameBudget = Math.round((this.sampleRate * ADAPT_INTERVAL_MS) / MS_PER_SECOND);
+    this.lastPostedUnderruns = 0;
+    this.framesSinceUnderrunPost = 0;
     // Fractional resampling position carried across PCM batches so the
     // long-term output rate exactly matches the device rate ratio.
     this.resampleCarry = 0;
@@ -57,9 +60,11 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
       if (message?.type === 'set-target-buffer') {
         const ms = message.targetBufferMs;
         if (!Number.isFinite(ms) || ms < 0 || ms > MAX_BUFFER_MS) return;
+        // Slider is a floor: raising it lifts the adaptive ceiling too,
+        // lowering it keeps the headroom the adapter earned.
         this.userTargetBufferMs = ms;
-        this.autoTargetBufferMs = ms;
-        this.targetBufferFrames = Math.round((this.sampleRate * ms) / MS_PER_SECOND);
+        this.autoTargetBufferMs = Math.max(this.autoTargetBufferMs, ms);
+        this.targetBufferFrames = Math.round((this.sampleRate * this.autoTargetBufferMs) / MS_PER_SECOND);
         return;
       }
       if (message?.type !== 'pcm') return;
@@ -75,8 +80,14 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
     this.writeIndex = 0;
     this.hasStarted = false;
     this.resampleCarry = 0;
-    this.underrunsAtLastAdapt = this.underruns;
+    this.underruns = 0;
+    this.underrunsAtLastAdapt = 0;
     this.framesSinceAdapt = 0;
+    this.framesSinceUnderrunPost = 0;
+    this.lastPostedUnderruns = 0;
+    this.autoTargetBufferMs = this.userTargetBufferMs;
+    this.targetBufferFrames = Math.round((this.sampleRate * this.autoTargetBufferMs) / MS_PER_SECOND);
+    this.port.postMessage({ type: 'underrun', count: 0 });
   }
 
   adaptBuffer() {
@@ -93,8 +104,13 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
     }
 
     if (targetMs === this.autoTargetBufferMs) return;
+    const wasRaised = targetMs > this.autoTargetBufferMs;
     this.autoTargetBufferMs = targetMs;
     this.targetBufferFrames = Math.round((this.sampleRate * targetMs) / MS_PER_SECOND);
+    if (wasRaised && this.getBufferedFrames() < this.targetBufferFrames) {
+      // Re-prebuffer so the raised ceiling is actually honored
+      this.hasStarted = false;
+    }
     this.port.postMessage({ type: 'buffer-adapted', targetBufferMs: targetMs });
   }
 
@@ -113,18 +129,6 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
       const pcm = new Int16Array(buffer);
       const inputFrames = Math.floor(pcm.length / channelCount);
       if (inputFrames <= 0) return;
-      const isSameRate = inputSampleRate === this.sampleRate;
-      const estimatedOutputFrames = isSameRate
-        ? inputFrames
-        : Math.ceil(inputFrames * (this.sampleRate / inputSampleRate));
-
-      // Prevent overflow: if new frames push us past max capacity, drop the oldest frames
-      const currentBuffered = this.getBufferedFrames();
-      const overflow = (currentBuffered + estimatedOutputFrames) - this.maxBufferFrames;
-      if (overflow > 0) {
-        this.readIndex = (this.readIndex + overflow) % this.ringBufferSize;
-      }
-
       if (inputSampleRate === this.sampleRate) {
         const isStereo = channelCount === STEREO_CHANNELS;
         for (let frame = 0; frame < inputFrames; frame++) {
@@ -137,6 +141,11 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
           this.ringBufferR[this.writeIndex] = rightSample;
           this.writeIndex += 1;
           if (this.writeIndex === this.ringBufferSize) this.writeIndex = 0;
+        }
+        // Drop oldest frames if the buffer is now over capacity
+        const overflow = this.getBufferedFrames() - this.maxBufferFrames;
+        if (overflow > 0) {
+          this.readIndex = (this.readIndex + overflow) % this.ringBufferSize;
         }
         return;
       }
@@ -171,6 +180,12 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
         position += inputPerOutput;
       }
       this.resampleCarry = position - inputFrames;
+
+      // Drop oldest frames if the buffer is now over capacity
+      const overflow = this.getBufferedFrames() - this.maxBufferFrames;
+      if (overflow > 0) {
+        this.readIndex = (this.readIndex + overflow) % this.ringBufferSize;
+      }
     } catch (e) {
       console.error('[BMS Worklet] Error during enqueuePcm ring buffer write:', e.message);
     }
@@ -220,7 +235,17 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
 
     if (hitUnderrun) {
       this.underruns += 1;
-      this.port.postMessage({ type: 'underrun', count: this.underruns });
+      this.hasStarted = false; // Re-buffer from scratch instead of trickling
+      this.framesSinceUnderrunPost += leftOutput.length;
+      // Report the very first underrun immediately, then at most once per second
+      if (this.underruns === 1 || this.framesSinceUnderrunPost >= UNDRUN_POST_THROTTLE_FRAMES) {
+        this.framesSinceUnderrunPost = 0;
+        this.lastPostedUnderruns = this.underruns;
+        this.port.postMessage({ type: 'underrun', count: this.underruns });
+      }
+      this.framesSinceAdapt += leftOutput.length;
+      if (this.framesSinceAdapt >= this.adaptFrameBudget) this.adaptBuffer();
+      return true;
     }
 
     this.framesSinceAdapt += leftOutput.length;
