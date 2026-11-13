@@ -69,11 +69,9 @@ function createUsbStatus({
 } = {}) {
   let cache = null;
   let cacheTime = 0;
+  let inflight = null;
 
-  async function getStatus({ fresh = false } = {}) {
-    const age = now() - cacheTime;
-    if (!fresh && cache && age < cacheTtlMs) return cache;
-
+  async function queryFresh(nowFn) {
     let result;
     try {
       const { available, devices } = await runAdbDevices(spawnImpl, timeoutMs);
@@ -82,7 +80,7 @@ function createUsbStatus({
         state: available ? summarizeDevices(devices) : STATE_MISSING,
         devices,
         ready: available && devices.some((d) => d.state === STATE_DEVICE),
-        checkedAt: new Date(now()).toISOString(),
+        checkedAt: new Date(nowFn()).toISOString(),
       };
     } catch (err) {
       result = {
@@ -91,12 +89,26 @@ function createUsbStatus({
         devices: [],
         ready: false,
         error: err.message,
-        checkedAt: new Date(now()).toISOString(),
+        checkedAt: new Date(nowFn()).toISOString(),
       };
     }
-    cache = result;
-    cacheTime = now();
     return result;
+  }
+
+  async function getStatus({ fresh = false } = {}) {
+    const age = now() - cacheTime;
+    if (!fresh && cache && age < cacheTtlMs) return cache;
+    if (inflight) return inflight;
+    inflight = queryFresh(now).then((result) => {
+      cache = result;
+      cacheTime = now();
+      inflight = null;
+      return result;
+    }, (err) => {
+      inflight = null;
+      throw err;
+    });
+    return inflight;
   }
 
   return { getStatus };

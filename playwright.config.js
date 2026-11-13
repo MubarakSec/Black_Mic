@@ -1,6 +1,6 @@
 const { defineConfig, devices } = require('@playwright/test');
 
-const E2E_URL = process.env.BMS_E2E_URL || 'http://localhost:3001';
+const E2E_URL = process.env.BMS_E2E_URL || 'http://127.0.0.1:3001';
 
 module.exports = defineConfig({
   testDir: './tests/e2e',

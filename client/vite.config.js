@@ -20,7 +20,7 @@ const httpsOptions = hasCert ? {
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, path.resolve(__dirname, '..'), '');
   const port = env.PORT || '3001';
-  const proxyTarget = env.BMS_SERVER_URL || `${hasCert ? 'https' : 'http'}://localhost:${port}`;
+  const proxyTarget = env.BMS_SERVER_URL || `${hasCert ? 'https' : 'http'}://127.0.0.1:${port}`;
 
   return {
     plugins: [react()],

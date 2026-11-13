@@ -46,19 +46,26 @@ function advanceRoomGeneration(roomId) {
 
 const SPAWN_TIMEOUT_MS = 3000;
 
-function spawnWithTimeout(command, args, { stdinPipe = false } = {}) {
+function spawnWithTimeout(command, args) {
   return new Promise((resolve) => {
     let out = '';
-    const p = stdinPipe ? spawn(command, args, { stdio: ['pipe', 'ignore', 'ignore'] }) : spawn(command, args);
+    const p = spawn(command, args);
+    let timedOut = false;
     const timer = setTimeout(() => {
+      timedOut = true;
       logger.warn(`${command} timed out after ${SPAWN_TIMEOUT_MS}ms; killing`);
       p.kill('SIGKILL');
-      resolve({ code: -2, out: '' });
     }, SPAWN_TIMEOUT_MS);
     if (typeof timer.unref === 'function') timer.unref();
+    const backstop = setTimeout(() => resolve({ code: -2, out: '' }), SPAWN_TIMEOUT_MS + 500);
+    if (typeof backstop.unref === 'function') backstop.unref();
     if (p.stdout) p.stdout.on('data', d => (out += d));
-    p.on('close', code => { clearTimeout(timer); resolve({ code, out: out.trim() }); });
-    p.on('error', () => { clearTimeout(timer); resolve({ code: -1, out: '' }); });
+    p.on('close', code => {
+      clearTimeout(timer);
+      clearTimeout(backstop);
+      resolve({ code: timedOut ? -2 : code, out: out.trim() });
+    });
+    p.on('error', () => { clearTimeout(timer); clearTimeout(backstop); resolve({ code: -1, out: '' }); });
   });
 }
 
@@ -170,6 +177,9 @@ function resetBridgeState(session, bridge) {
   session.isDraining = false;
   session.pcmBufferQueue = [];
   session.pcmBufferBytes = 0;
+  // Stamp the failure so the respawn cooldown engages no matter which path
+  // tore the bridge down (EPIPE, dead stdin, unexpected close).
+  session.lastPacatFailureAt = Date.now();
 }
 
 // ---------------------------------------------------------------------------

@@ -48,10 +48,13 @@ function clearJoinAttempts(socketId) {
   joinAttempts.delete(socketId);
 }
 
-const PCM_BUDGET_BYTES = 512 * 1024;
-const PCM_REFILL_BYTES_PER_SEC = 256 * 1024;
+const PCM_BUDGET_BYTES = 1536 * 1024;
+const PCM_REFILL_BYTES_PER_SEC = 400 * 1024; // >= 96kHz stereo (384 KB/s) with headroom
 const PCM_WARN_INTERVAL_MS = 5000;
+const HANDSHAKE_WARN_INTERVAL_MS = 5000;
+const MAX_ORIGIN_LOG_LENGTH = 120;
 const pcmBuckets = new Map();
+let lastHandshakeWarn = 0;
 
 function takePcmBudget(socketId, bytes, now = Date.now()) {
   let bucket = pcmBuckets.get(socketId);
@@ -59,8 +62,8 @@ function takePcmBudget(socketId, bytes, now = Date.now()) {
     bucket = { tokens: PCM_BUDGET_BYTES, lastRefill: now, lastWarn: 0 };
     pcmBuckets.set(socketId, bucket);
   }
-  const elapsedSec = (now - bucket.lastRefill) / 1000;
-  bucket.tokens = Math.min(PCM_BUDGET_BYTES, bucket.tokens + (elapsedSec * PCM_REFILL_BYTES_PER_SEC));
+  const elapsedSec = Math.max(0, (now - bucket.lastRefill) / 1000);
+  bucket.tokens = Math.min(PCM_BUDGET_BYTES, Math.max(0, bucket.tokens + (elapsedSec * PCM_REFILL_BYTES_PER_SEC)));
   bucket.lastRefill = now;
   if (bucket.tokens < bytes) {
     if (now - bucket.lastWarn >= PCM_WARN_INTERVAL_MS) {
@@ -83,7 +86,7 @@ app.use((_req, res, next) => {
   res.setHeader('Content-Security-Policy',
     "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; " +
     "img-src 'self' data: blob:; media-src 'self' blob:; " +
-    "connect-src 'self' ws: wss:");
+    "connect-src 'self'");
   res.setHeader('Referrer-Policy', 'no-referrer');
   res.setHeader('X-Frame-Options', 'DENY');
   next();
@@ -105,7 +108,12 @@ const io = new Server(server, {
     const origin = req.headers.origin;
     const allowed = isOriginAllowed(origin, req.headers.host, config.corsOrigin);
     if (!allowed) {
-      logger.warn(`Rejected socket handshake from origin: ${origin}`);
+      const now = Date.now();
+      if (now - lastHandshakeWarn >= HANDSHAKE_WARN_INTERVAL_MS) {
+        lastHandshakeWarn = now;
+        const safeOrigin = String(origin || '(none)').slice(0, MAX_ORIGIN_LOG_LENGTH);
+        logger.warn(`Rejected socket handshake from origin: ${safeOrigin}`);
+      }
     }
     callback(null, allowed);
   },
