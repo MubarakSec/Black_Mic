@@ -208,7 +208,7 @@ io.on('connection', (socket) => {
     if (!pcmChunk) return;
 
     // Relay only the validated PCM payload (reconstructed with header for receiver parsing)
-    const relayBuf = Buffer.alloc(HEADER_BYTE_LENGTH + pcmChunk.buffer.length);
+    const relayBuf = Buffer.allocUnsafe(HEADER_BYTE_LENGTH + pcmChunk.buffer.length);
     relayBuf.writeUInt16LE(PCM_MAGIC, 0);
     relayBuf.writeUInt32LE(pcmChunk.sampleRate, 2);
     relayBuf.writeUInt8(pcmChunk.channelCount, 6);
