@@ -278,7 +278,7 @@ export function useSocketConnection({
         remoteAckTimerRef.current = null;
       }
     };
-  }, [role, inputGain, setInputGain, setIsPhoneMuted, setRemotePhoneGain, setRemoteAckMsg, senderGainNodeRef, addLog, socketRef]);
+  }, [role, setInputGain, setIsPhoneMuted, setRemotePhoneGain, setRemoteAckMsg, senderGainNodeRef, addLog, socketRef]);
 
   // Listen for pcm-chunks on receiver
   useEffect(() => {
