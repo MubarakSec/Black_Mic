@@ -9,7 +9,7 @@ import { useAudioEngine } from './hooks/useAudioEngine';
 import { useMicrophoneDevices } from './hooks/useMicrophoneDevices';
 import { useSocketConnection } from './hooks/useSocketConnection';
 import { isValidRoomId } from './utils/socketValidation';
-import { readClampedNumber } from './utils/storage';
+import { readClampedNumber, writeStoredValue } from './utils/storage';
 import {
   DEFAULT_ROOM_ID,
   LS_ROOM_ID,
@@ -53,10 +53,10 @@ function App() {
   const socketRef = useRef(null);
 
   // Sync basic state to localStorage
-  useEffect(() => { localStorage.setItem(LS_ROOM_ID, roomId); }, [roomId]);
-  useEffect(() => { localStorage.setItem(LS_CHANNEL_MODE, channelMode); }, [channelMode]);
-  useEffect(() => { localStorage.setItem(LS_AUDIO_PROFILE, audioProfile); }, [audioProfile]);
-  useEffect(() => { localStorage.setItem(LS_RECEIVER_BUFFER_MS, jitterBufferMs); }, [jitterBufferMs]);
+  useEffect(() => { writeStoredValue(LS_ROOM_ID, roomId); }, [roomId]);
+  useEffect(() => { writeStoredValue(LS_CHANNEL_MODE, channelMode); }, [channelMode]);
+  useEffect(() => { writeStoredValue(LS_AUDIO_PROFILE, audioProfile); }, [audioProfile]);
+  useEffect(() => { writeStoredValue(LS_RECEIVER_BUFFER_MS, jitterBufferMs); }, [jitterBufferMs]);
 
   // Hardware Microphone Devices Hook
   const {
