@@ -9,6 +9,8 @@ import { audioBufferToWav } from '../utils/wavEncoder';
  * @param {React.MutableRefObject} opts.destRef    - MediaStreamAudioDestinationNode ref
  * @param {function} opts.addLog
  */
+const RECORDING_BITRATE_BPS = 128_000;
+
 export function useRecording({ destRef, addLog }) {
   const [isAudioRecording, setIsAudioRecording] = useState(false);
   const [recordings, setRecordings] = useState([]);
@@ -45,7 +47,7 @@ export function useRecording({ destRef, addLog }) {
       : 'audio/webm';
     audioChunksRef.current = [];
     keepStoppedRecordingRef.current = true;
-    audioRecorderRef.current = new MediaRecorder(audioStream, { mimeType });
+    audioRecorderRef.current = new MediaRecorder(audioStream, { mimeType, audioBitsPerSecond: RECORDING_BITRATE_BPS });
     audioRecorderRef.current.ondataavailable = (e) => {
       if (e.data.size > 0) audioChunksRef.current.push(e.data);
     };
