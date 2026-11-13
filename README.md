@@ -11,7 +11,10 @@ This makes your phone's microphone available system-wide on your PC, allowing yo
 - **Uncompressed Audio Streaming:** Captures raw microphone input from the phone and streams Int16 PCM directly to the PC — no codec latency, no transcoding artifacts.
 - **Low-Latency Voice Bridge:** Relays PCM chunks over WebSockets and maps them to a virtual PipeWire null-sink with a small receiver jitter buffer for smoother speech.
 - **System-Wide Input:** Automatically registers the virtual device on your PC so you can select the phone mic in external applications.
-- **Browser Audio Recording:** Enables receiver-side local audio-only takes.
+- **Browser Audio Recording:** Receiver-side takes with **128 kbps Opus**, plus one-click **lossless WAV (Int16) export** — same-quality masters from every recorded take.
+- **STUDIO Broadcast Profile:** Default voice chain for the phone mic — 100 Hz HPF, +2.5 dB presence bump @ 3.2 kHz, +3 dB air shelf @ 12 kHz, gentle 3:1 compressor, plus the optional calibrated noise gate.
+- **Adaptive Jitter Buffer:** The receiver automatically raises the playback buffer in 10 ms steps when underruns spike and relaxes toward your floor when stable (never below your setting).
+- **TPDF Dithered Capture:** Float→Int16 conversion with ±1 LSB triangular dither — no quantization grit in quiet passages.
 - **Voice Telemetry:** Displays real-time round-trip latency, bitrate, and receiver underruns.
 - **No Video Capture:** OBS handles video; this tool only provides the phone microphone audio path.
 
@@ -92,6 +95,20 @@ Because this tool maps the phone microphone into a PipeWire virtual device, exte
 3. Navigate to the app's **Audio/Microphone Input Settings**.
 4. Select **"Monitor of Black"** (or `BMS_ROOM.monitor`) as the active input device.
 5. In OBS, keep your normal video capture setup and use this virtual device only as the microphone source.
+
+---
+
+## Audio Profiles
+
+| Profile | Chain | Use it for |
+| --- | --- | --- |
+| **STUDIO** (default) | 100 Hz HPF → presence peak (+2.5 dB @ 3.2 kHz) → air shelf (+3 dB @ 12 kHz) → 3:1 compressor → limiter; noise gate available | Broadcast-voice sound from the phone mic |
+| RAW | No browser/Android DSP, unity gain path, soft limiter bypassed for full fidelity | External processing, archival |
+| CLEAN | 80 Hz HPF → gentle compressor → limiter | General calls |
+| FAN | HPF + calibrated noise-floor expander (quiet room required) | Fan/environment noise |
+| CALL | Browser echo cancellation + noise suppression | Open-speaker echo situations |
+
+The noise gate calibration (Capture → 🎯 Calibrate) applies to **FAN and STUDIO** — ruler-flat noise floor, opened instantly by voice.
 
 ---
 

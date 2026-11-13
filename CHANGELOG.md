@@ -1,5 +1,23 @@
 # Changelog
 
+## 1.3.0 — 2026-11-13
+
+Studio voice milestone.
+
+### Added
+- **STUDIO profile** (new default for fresh installs): 100 Hz HPF → presence peak (+2.5 dB @ 3.2 kHz) → air shelf (+3 dB @ 12 kHz) → 3:1 compressor → peak limiter. Browser DSP intentionally bypassed for control. Noise-gate calibration now applies to STUDIO as well.
+- **Lossless WAV export** for recorded takes: webm/opus is decoded via Web Audio and re-encoded as interleaved Int16 WAV with TPDF dither (`utils/wavEncoder.js`); per-take WAV button in the Recording Library.
+- **Adaptive jitter buffer** on the receiver: +10 ms steps (max 120 ms) on underrun spikes, −5 ms relax toward the user's floor when stable; changes are logged.
+- WAV encoder unit tests.
+
+### Fixed
+- Float→Int16 capture conversion now applies ±1 LSB TPDF dither (quantization noise becomes smooth, not gritty).
+- Stereo noise-reduction envelope no longer double-progresses per sample; gain smoothing is per frame and applied identically to both channels.
+
+### Changed
+- Webm recording bitrate raised to 128 kbps Opus.
+- Audio profile segmented control gains the STUDIO option; noise-gate UI generalized (FAN/STUDIO) with updated copy.
+
 ## 1.2.0 — 2026-11-13
 
 USB-first mode. The phone now connects exclusively over USB by default.
