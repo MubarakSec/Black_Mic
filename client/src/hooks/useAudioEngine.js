@@ -155,14 +155,16 @@ export function useAudioEngine({
     if (!wakeLockRef.current) return;
     try {
       await wakeLockRef.current.release();
-      wakeLockRef.current = null;
       addLog('💡 Wake Lock released.');
     } catch (err) {
       console.error(err);
+    } finally {
+      wakeLockRef.current = null;
     }
   }, [addLog]);
 
   const requestWakeLock = useCallback(async () => {
+    if (wakeLockRef.current) return;
     if (!('wakeLock' in navigator)) {
       addLog('⚠️ Wake Lock API not supported on this browser.');
       return;
