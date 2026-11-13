@@ -1,16 +1,27 @@
-# React + Vite
+# Black Mic Studio — Client
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+React 19 + Vite single-page app. It is **not** a standalone project — see the
+[root README](../README.md) for setup and [ARCHITECTURE.md](./ARCHITECTURE.md)
+for the module map and data flow.
 
-Currently, two official plugins are available:
+## Scripts
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+| Command | Purpose |
+| --- | --- |
+| `npm run dev` | Vite dev server (https when `../server.key`+`../server.cert` exist); proxies `/socket.io`, `/usb-status`, `/healthz` to `127.0.0.1:$PORT` (env `BMS_SERVER_URL` overrides) |
+| `npm run build` | Production bundle → `dist/` |
+| `npm run preview` | Serve `dist/` locally (used by CI's smoke check) |
+| `npm run lint` | oxlint (zero-warning policy; also enforced in CI) |
 
-## React Compiler
+## Conventions
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- Protocol constants mirror `server/protocol.js` — change both together.
+- `localStorage` access goes through `src/utils/storage.js`, never raw calls.
+- React 19: no setState-in-effect for derivable values; refs never read during render.
+- `AudioWorklet` only; the visualizer writes the DOM directly at 20 fps and skips
+  rendering entirely under `prefers-reduced-motion`.
 
-## Expanding the Oxlint configuration
+## Environment
 
-If you are developing a production application, we recommend using TypeScript with type-aware lint rules enabled. Check out the [TS template](https://github.com/vitejs/vite/tree/main/packages/create-vite/template-react-ts) for information on how to integrate TypeScript and Oxlint's TypeScript related rules in your project.
+`BMS_SERVER_URL`, `PORT` (shared with the server, default 3001). See root README's
+environment table.
