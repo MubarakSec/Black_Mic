@@ -42,6 +42,7 @@ export function useAudioEngine({
   jitterBufferMs,
   selectedDeviceId,
   onMicStarted,
+  isPhoneMuted = false,
 }) {
   const [inputGain, setInputGain] = useState(() => readClampedNumber(LS_INPUT_GAIN, 1.0, GAIN_MIN, GAIN_MAX));
   const [outputVolume, setOutputVolume] = useState(() => readClampedNumber(LS_OUTPUT_VOLUME, 1.0, GAIN_MIN, GAIN_MAX));
@@ -75,6 +76,7 @@ export function useAudioEngine({
   const hasConnectedOnceRef = useRef(false);
   const hasSentFirstChunkRef = useRef(false);
   const telemetryRef = useRef({ peakDb: -100, rmsDb: -100, clippedSamples: 0 });
+  const isPhoneMutedRef = useRef(isPhoneMuted);
   const [keepalive] = useState(() => createAudioKeepalive());
 
   // Visualizer DOM element refs for high-performance direct rendering
@@ -104,6 +106,8 @@ export function useAudioEngine({
     });
   };
 
+  useEffect(() => { isPhoneMutedRef.current = isPhoneMuted; }, [isPhoneMuted]);
+
   // Persist settings
   useEffect(() => { writeStoredValue(LS_INPUT_GAIN, inputGain); }, [inputGain]);
   useEffect(() => { writeStoredValue(LS_OUTPUT_VOLUME, outputVolume); }, [outputVolume]);
@@ -120,16 +124,18 @@ export function useAudioEngine({
     });
   }, [audioProfile, noiseFloorDb, noiseReductionActive]);
 
-  // Update sender gain dynamically
+  // Update sender gain dynamically (respecting remote mute)
   useEffect(() => {
     if (senderGainNodeRef.current && audioContextRef.current) {
+      const effectiveGain = isPhoneMutedRef.current ? 0 : inputGain;
       senderGainNodeRef.current.gain.setTargetAtTime(
-        inputGain,
+        effectiveGain,
         audioContextRef.current.currentTime,
         0.01
       );
     }
-  }, [inputGain]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [inputGain, isPhoneMuted]);
 
   // Update receiver volume dynamically
   useEffect(() => {
@@ -304,11 +310,11 @@ export function useAudioEngine({
         const payload = e.data;
         const processedBuffer = payload.buffer || payload;
 
-        if (payload.peakDb !== undefined) {
+        if (Number.isFinite(payload?.peakDb) && Number.isFinite(payload?.rmsDb) && Number.isInteger(payload?.clippedSamples)) {
           telemetryRef.current = {
             peakDb: payload.peakDb,
             rmsDb: payload.rmsDb,
-            clippedSamples: payload.clippedSamples
+            clippedSamples: payload.clippedSamples,
           };
         }
 
@@ -454,16 +460,22 @@ export function useAudioEngine({
     }
   };
 
+  const unlockAudioInFlightRef = useRef(false);
+
   const unlockAudio = () => {
-    if (audioContextRef.current) {
-      audioContextRef.current.resume().then(() => {
-        setIsAudioLocked(false);
-        playUnlockBeep(audioContextRef.current);
-        addLog('🔊 Audio Context unlocked successfully!');
-      }).catch(err => {
-        addLog(`❌ Audio unlock failed: ${err.message}`);
-      });
-    }
+    const ctx = audioContextRef.current;
+    if (!ctx) return;
+    if (unlockAudioInFlightRef.current) return;
+    unlockAudioInFlightRef.current = true;
+    ctx.resume().then(() => {
+      unlockAudioInFlightRef.current = false;
+      setIsAudioLocked(false);
+      playUnlockBeep(ctx);
+      addLog('🔊 Audio Context unlocked successfully!');
+    }).catch(err => {
+      unlockAudioInFlightRef.current = false;
+      addLog(`❌ Audio unlock failed: ${err.message}`);
+    });
   };
 
   const startNoiseCalibration = useCallback(() => {
@@ -501,6 +513,10 @@ export function useAudioEngine({
   }, [addLog]);
 
   const toggleNoiseReduction = () => {
+    if (!noiseReductionActive && noiseFloorDb === null) {
+      addLog('⚠️ Calibrate fan noise first, then enable reduction.');
+      return;
+    }
     const next = !noiseReductionActive;
     setNoiseReductionActive(next);
     addLog(next ? '🎛️ Smooth fan reduction activated' : '🎛️ Fan reduction deactivated');

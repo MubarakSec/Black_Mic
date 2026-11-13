@@ -16,8 +16,10 @@ export function useUsbStatus() {
     let timer = null;
 
     const poll = async () => {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 4000);
       try {
-        const res = await fetch('/usb-status', { cache: 'no-store' });
+        const res = await fetch('/usb-status', { cache: 'no-store', signal: controller.signal });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         const data = await res.json();
         const state = VALID_STATES.has(data?.state) ? data.state : 'missing';
@@ -36,6 +38,7 @@ export function useUsbStatus() {
           setUsbStatus({ available: false, state: 'missing', ready: false, devicesCount: 0 });
         }
       } finally {
+        clearTimeout(timeout);
         if (!cancelled) timer = setTimeout(poll, USB_POLL_INTERVAL_MS);
       }
     };

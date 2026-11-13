@@ -1,4 +1,4 @@
-import { PROFILE_CLEAN, PROFILE_FAN, PROFILE_STUDIO } from '../constants';
+import { PROFILE_CALL, PROFILE_CLEAN, PROFILE_FAN, PROFILE_STUDIO } from '../constants';
 
 // dBFS / millisecond-scale dynamics tuning shared by the voice profiles.
 const HIGHPASS_FREQUENCY_HZ = 80;
@@ -78,6 +78,18 @@ export function connectProfileInput({ audioContext, source, gainNode, audioProfi
     source.connect(highPass);
     highPass.connect(compressor);
     compressor.connect(gainNode);
+    return;
+  }
+  // CALL: browser echo-cancellation/noise-suppression do the heavy lifting;
+  // we only strip rumble, matching FAN's high-pass.
+  if (audioProfile === PROFILE_CALL) {
+    const highPass = audioContext.createBiquadFilter();
+    highPass.type = 'highpass';
+    highPass.frequency.value = HIGHPASS_FREQUENCY_HZ;
+    highPass.Q.value = HIGHPASS_Q;
+
+    source.connect(highPass);
+    highPass.connect(gainNode);
     return;
   }
   if (audioProfile === PROFILE_FAN) {

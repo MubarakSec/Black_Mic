@@ -40,8 +40,6 @@ export function startVisualizerLoop({
   analyserRef.current.smoothingTimeConstant = 0.8;
   const bufferLength = analyserRef.current.frequencyBinCount;
   const dataArray = new Uint8Array(bufferLength);
-  const canvas = canvasRef.current;
-  const canvasContext = canvas?.getContext('2d');
   const activeColor = activeRole === ROLE_SENDER
     ? VISUALIZER_SENDER_COLOR
     : VISUALIZER_RECEIVER_COLOR;
@@ -146,7 +144,9 @@ export function startVisualizerLoop({
       }
     }
 
-    // Draw real-time frequency visualizer on canvas
+    // Draw real-time frequency visualizer on canvas (resolved lazily each frame)
+    const canvas = canvasRef.current;
+    const canvasContext = canvas?.getContext('2d');
     if (canvas && canvasContext) {
       if (canvasDimsRef.current.width === 0) {
         canvasDimsRef.current.width = canvas.width;
@@ -155,7 +155,7 @@ export function startVisualizerLoop({
       const { width, height } = canvasDimsRef.current;
       canvasContext.clearRect(0, 0, width, height);
 
-      const barWidth = (width / bufferLength) * 1.6;
+      const barWidth = width / bufferLength;
       const drawableBarWidth = Math.max(1, barWidth - VISUALIZER_BAR_GAP_PX);
       let x = 0;
 

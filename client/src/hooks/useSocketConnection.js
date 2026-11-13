@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { io } from 'socket.io-client';
 import {
   isValidRemoteCommand,
+  isValidRoomId,
   normalizeJoinResponse,
   normalizePcmPayload,
   normalizeRoomState,
@@ -30,6 +31,8 @@ const JOIN_FAILED_MESSAGE = 'Could not join the studio room. Please try again.';
 const REMOTE_ACK_DURATION_MS = 2500;
 const GAIN_SMOOTHING_TIME_SEC = 0.01;
 
+function logger_msg(...args) { console.warn('[BMS]', ...args); }
+
 export function useSocketConnection({
   role,
   roomId,
@@ -49,6 +52,7 @@ export function useSocketConnection({
   isSignalLost,
   setIsSignalLost,
   isSenderAudioReady,
+  isPhoneMuted,
 }) {
   const [operatorIssue, setOperatorIssue] = useState(null);
   const [roomState, setRoomState] = useState(null);
@@ -61,11 +65,13 @@ export function useSocketConnection({
   const roomIdRef = useRef(roomId);
   const inputGainRef = useRef(inputGain);
   const isSignalLostRef = useRef(isSignalLost);
+  const isPhoneMutedRef = useRef(isPhoneMuted);
   const isSenderAudioReadyRef = useRef(isSenderAudioReady);
   const remoteAckTimerRef = useRef(null);
 
   useEffect(() => { roleRef.current = role; }, [role]);
   useEffect(() => { isSignalLostRef.current = isSignalLost; }, [isSignalLost]);
+  useEffect(() => { isPhoneMutedRef.current = isPhoneMuted; }, [isPhoneMuted]);
   useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
   useEffect(() => { inputGainRef.current = inputGain; }, [inputGain]);
   useEffect(() => { isSenderAudioReadyRef.current = isSenderAudioReady; }, [isSenderAudioReady]);
@@ -139,6 +145,13 @@ export function useSocketConnection({
         joinRoom(socket, roomIdRef.current, roleRef.current);
         setIsSignalLost(false);
       }
+    });
+
+    socket.on('connect_error', (error) => {
+      logger_msg('Connection error:', error?.message || error);
+      setOperatorIssue('Cannot reach the server. Is it running?');
+      setStatus('Connection to the server failed. Check that the server is running, then try again.');
+      addLog(`⚠️ Connection error: ${error?.message || 'unknown'}`);
     });
 
     socket.on('disconnect', (reason) => {
@@ -215,7 +228,7 @@ export function useSocketConnection({
 
     socket.on('pong-rtt', (startTime) => {
       const rtt = Date.now() - startTime;
-      if (!Number.isFinite(rtt) || rtt < 0) return;
+      if (!Number.isFinite(rtt) || rtt < 0 || rtt > 5000) return;
       setLatency(rtt);
     });
 
@@ -224,14 +237,17 @@ export function useSocketConnection({
       socket.on('remote-control', (cmd) => {
         if (!isValidRemoteCommand(cmd)) return;
         const { type, value } = cmd;
+        // Bound by the server to the room the command was sent in
+        const ackRoomId = typeof cmd.roomId === 'string' && isValidRoomId(cmd.roomId) ? cmd.roomId : roomIdRef.current;
         if (type === 'gain') {
           setInputGain(value);
           if (senderGainNodeRef.current) {
             const now = senderGainNodeRef.current.context?.currentTime ?? 0;
-            senderGainNodeRef.current.gain.setTargetAtTime(value, now, GAIN_SMOOTHING_TIME_SEC);
+            const effective = isPhoneMutedRef.current ? 0 : value;
+            senderGainNodeRef.current.gain.setTargetAtTime(effective, now, GAIN_SMOOTHING_TIME_SEC);
           }
           addLog(`🎛️ Remote Gain set to ${Math.round(value * 100)}%`);
-          socket.emit('remote-control-ack', { type: 'gain', value }, roomIdRef.current);
+          socket.emit('remote-control-ack', { type: 'gain', value, roomId: ackRoomId }, ackRoomId);
           return;
         }
         if (type === 'mute') {
@@ -242,7 +258,7 @@ export function useSocketConnection({
             senderGainNodeRef.current.gain.setTargetAtTime(target, now, GAIN_SMOOTHING_TIME_SEC);
           }
           addLog(value ? '🔇 Remote Muted by PC' : '🔊 Remote Unmuted by PC');
-          socket.emit('remote-control-ack', { type: 'mute', value }, roomIdRef.current);
+          socket.emit('remote-control-ack', { type: 'mute', value, roomId: ackRoomId }, ackRoomId);
         }
       });
     }
@@ -267,9 +283,11 @@ export function useSocketConnection({
     const interval = setInterval(() => {
       if (socket.connected) {
         socket.emit('ping-rtt', Date.now());
-        const kbps = Math.round((bytesCountRef.current * 8) / 1000);
-        setBitrate(kbps);
-        bytesCountRef.current = 0;
+        if (roleRef.current === ROLE_RECEIVER) {
+          const kbps = Math.round((bytesCountRef.current * 8) / 1000);
+          setBitrate(kbps);
+          bytesCountRef.current = 0;
+        }
       }
     }, TELEMETRY_POLL_INTERVAL_MS);
 

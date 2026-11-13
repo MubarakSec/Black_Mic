@@ -11,6 +11,7 @@ import {
   ROOM_ID_REGEX,
 } from './protocol';
 const MAX_SERVER_MESSAGE_LENGTH = 240;
+const MAX_PCM_PAYLOAD_BYTES = 64 * 1024;
 const MAX_SERVER_CODE_LENGTH = 40;
 const MAX_SOURCE_NAME_LENGTH = 64;
 
@@ -82,6 +83,10 @@ export function normalizePcmPayload(data) {
   const byteLength = data.byteLength;
 
   if (byteLength <= HEADER_BYTE_LENGTH) return null;
+  if (byteLength > MAX_PCM_PAYLOAD_BYTES) {
+    console.warn(`[BMS] Dropping oversized PCM payload (${byteLength} bytes)`);
+    return null;
+  }
 
   // Read header: [uint16: magic][uint32: sampleRate][uint8: channelCount]
   const view = new DataView(rawBuffer, byteOffset, HEADER_BYTE_LENGTH);

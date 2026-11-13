@@ -138,6 +138,7 @@ function App() {
     jitterBufferMs,
     selectedDeviceId,
     onMicStarted: refreshDevices,
+    isPhoneMuted,
   });
 
   // Socket Connection Hook (handles Socket.IO, pcm-chunk relay, RTT ping, bitrate calculation)
@@ -168,6 +169,7 @@ function App() {
     isSignalLost,
     setIsSignalLost,
     isSenderAudioReady: Boolean(micSettings),
+    isPhoneMuted,
   });
 
   // Restart the sender pipeline when channel mode, profile, or mic device changes.
@@ -208,6 +210,8 @@ function App() {
       }
       if (!result?.ok && !tearedDownMidRestart) {
         setStartError(result?.message || 'The phone microphone could not restart.');
+        teardownSession();
+        setStatus('Waiting to connect...');
       }
       senderRestartBusyRef.current = false;
       setIsSenderRestarting(false);

@@ -29,6 +29,10 @@ export function playAlarmBeep(audioContext) {
       EXPONENTIAL_RAMP_FLOOR,
       audioContext.currentTime + (ALARM_BEEP_DURATION_SEC - ALARM_RAMP_OFFSET_SEC),
     );
+    osc.onended = () => {
+      osc.disconnect();
+      gain.disconnect();
+    };
     osc.connect(gain);
     gain.connect(audioContext.destination);
     osc.start();
@@ -49,6 +53,10 @@ export function playUnlockBeep(audioContext) {
       EXPONENTIAL_RAMP_FLOOR,
       audioContext.currentTime + UNLOCK_NOTE_1_RAMP_SEC,
     );
+    osc1.onended = () => {
+      osc1.disconnect();
+      gain1.disconnect();
+    };
     osc1.connect(gain1);
     gain1.connect(audioContext.destination);
     osc1.start();
@@ -68,6 +76,10 @@ export function playUnlockBeep(audioContext) {
       EXPONENTIAL_RAMP_FLOOR,
       audioContext.currentTime + UNLOCK_NOTE_2_RAMP_SEC,
     );
+    osc2.onended = () => {
+      osc2.disconnect();
+      gain2.disconnect();
+    };
     osc2.connect(gain2);
     gain2.connect(audioContext.destination);
     osc2.start();
