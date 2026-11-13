@@ -60,6 +60,7 @@ export default function StudioConsole({
   onToggleNoiseReduction,
   onSetNoiseFloor,
   onExportRecording,
+  isEngineReady,
   isSenderRestarting,
   onStartAudioRecording,
   onStopAudioRecording,
@@ -128,6 +129,7 @@ export default function StudioConsole({
           onRemoteGainChange={onRemoteGainChange}
           onToggleRemoteMute={onToggleRemoteMute}
           onToggleMonitoring={onToggleMonitoring}
+          isEngineReady={isEngineReady}
           onStartAudioRecording={onStartAudioRecording}
           onStopAudioRecording={onStopAudioRecording}
         />

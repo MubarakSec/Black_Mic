@@ -390,3 +390,8 @@
   border-color: rgba(255, 77, 77, 0.4);
   background: rgba(255, 77, 77, 0.08);
 }
+
+.blackout-screen:focus-visible {
+  outline: 3px solid var(--accent-1);
+  outline-offset: -3px;
+}

@@ -106,6 +106,7 @@ function App() {
     isSignalLost,
     setIsSignalLost,
     micSettings,
+    isEngineReady,
     isCalibrating,
     noiseFloorDb,
     noiseReductionActive,
@@ -249,6 +250,9 @@ function App() {
     setIsAudioLocked(false);
     setIsSignalLost(false);
     hasConnectedOnceRef.current = false;
+    setIsPhoneMuted(false);
+    setRemotePhoneGain(1.0);
+    setRemoteAckMsg(null);
     setStartError(null);
     clearJoinError();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -334,6 +338,7 @@ function App() {
           setRoomId={setRoomId} 
           onStartSender={onStartSender} 
           onStartReceiver={onStartReceiver} 
+          onRoomSubmit={validateRoomBeforeStart}
           startingRole={startingRole}
           startError={startError}
         />
@@ -396,6 +401,7 @@ function App() {
         onToggleNoiseReduction={toggleNoiseReduction}
         onSetNoiseFloor={setManualNoiseFloor}
         onExportRecording={exportRecordingAsWav}
+        isEngineReady={isEngineReady}
         isSenderRestarting={isSenderRestarting}
         onStartAudioRecording={startAudioOnlyRecording}
         onStopAudioRecording={stopAudioOnlyRecording}

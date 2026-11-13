@@ -11,8 +11,8 @@
   --success-color: #00f58c;
   --focus-ring: rgba(0, 210, 255, 0.45);
   --transition-fast: 150ms ease;
-  --z-alarm: 90;
-  --z-modal: 100;
+  --z-alarm: 130;
+  --z-modal: 125;
   --z-blackout: 110;
 }
 

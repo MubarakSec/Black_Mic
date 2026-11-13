@@ -159,7 +159,7 @@ export default function SenderControls({
         </div>
       </div>
 
-      <BlackoutControl />
+      <BlackoutControl restartBusy={restartBusy} />
 
       {micSettings && (
         <div style={{

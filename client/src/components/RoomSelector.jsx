@@ -7,30 +7,40 @@ export default function RoomSelector({
   setRoomId,
   onStartSender,
   onStartReceiver,
+  onRoomSubmit,
   startingRole,
   startError,
 }) {
   const isStarting = Boolean(startingRole);
 
+  const handleSubmit = (event) => {
+    event.preventDefault();
+    if (onRoomSubmit) onRoomSubmit();
+  };
+
   return (
     <div className="console-panel text-center">
+      <form onSubmit={handleSubmit}>
       <h1 className="title">Black Mic Studio</h1>
       <p className="subtitle">Connect your phone microphone to this PC.</p>
       
       <div className="room-input-container">
         <label className="room-input-label" htmlFor="studio-room-id">Studio Room ID</label>
-        <input 
+        <input
           id="studio-room-id"
-          type="text" 
-          value={roomId} 
+          type="text"
+          value={roomId}
           maxLength={12}
           onChange={(e) => setRoomId(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, ''))}
           className="room-input"
           aria-describedby="studio-room-hint"
           disabled={isStarting}
+          enterKeyHint="go"
         />
         <span id="studio-room-hint" className="room-input-hint">Use the same ID on both devices to pair.</span>
       </div>
+
+      </form>
 
       {startError && (
         <div className="setup-error" role="alert">

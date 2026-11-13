@@ -36,8 +36,12 @@ export default function HardwareMicSelector({
           cursor: 'pointer',
         }}
       >
-        {availableMics.map((mic) => (
-          <option key={mic.deviceId} value={mic.deviceId} style={{ background: '#14181e', color: '#fff' }}>
+        {availableMics.map((mic, index) => (
+          <option
+            key={mic.deviceId || `mic-${index}`}
+            value={mic.deviceId}
+            style={{ background: '#14181e', color: '#fff' }}
+          >
             {mic.displayName}
           </option>
         ))}

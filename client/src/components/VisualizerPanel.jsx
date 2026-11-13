@@ -48,8 +48,7 @@ export default function VisualizerPanel({ role, canvasRef, orbRef, iconRef, vuBa
           display: 'block', 
           margin: '0.5rem 0 1rem 0', 
           borderRadius: '4px',
-          opacity: 0.2,
-          transition: 'opacity 0.3s ease'
+          opacity: 0.2
         }} 
       />
 

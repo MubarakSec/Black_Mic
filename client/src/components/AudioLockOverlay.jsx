@@ -4,7 +4,9 @@ import { Volume2 } from 'lucide-react';
 export default function AudioLockOverlay({ onUnlock }) {
   useEffect(() => {
     const handleKeyDown = (event) => {
+      if (event.metaKey || event.ctrlKey || event.altKey) return;
       if (event.key === 'Escape' || event.key === 'Enter' || event.key === ' ') {
+        event.preventDefault();
         onUnlock?.();
       }
     };
@@ -25,7 +27,7 @@ export default function AudioLockOverlay({ onUnlock }) {
         <Volume2 size={64} className="pulse-icon" aria-hidden="true" />
         <h2 id="audio-lock-title">AUDIO OUTPUT LOCKED</h2>
         <p id="audio-lock-description">The browser blocked auto-playback. Click anywhere on this screen to unlock the audio stream.</p>
-        <button type="button" className="btn-control mt-8" autoFocus onClick={onUnlock}>Unlock Audio</button>
+        <button type="button" className="btn-control mt-8" autoFocus onClick={(e) => { e.stopPropagation(); onUnlock?.(); }}>Unlock Audio</button>
       </div>
     </div>
   );

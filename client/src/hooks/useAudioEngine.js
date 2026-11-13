@@ -52,6 +52,7 @@ export function useAudioEngine({
   const [isSignalLost, setIsSignalLost] = useState(false);
   const [micSettings, setMicSettings] = useState(null);
   const [isCalibrating, setIsCalibrating] = useState(false);
+  const [isEngineReady, setIsEngineReady] = useState(false);
   const [noiseFloorDb, setNoiseFloorDb] = useState(() => {
     const value = readClampedNumber(LS_NOISE_FLOOR, NaN, MIN_NOISE_FLOOR_DB, MAX_NOISE_FLOOR_DB);
     return Number.isNaN(value) ? null : value;
@@ -255,6 +256,7 @@ export function useAudioEngine({
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
       await resumeAudioContext();
       keepalive.start(audioContextRef.current);
+    setIsEngineReady(true);
       if (typeof onMicStarted === 'function') {
         onMicStarted();
       }
@@ -459,6 +461,7 @@ export function useAudioEngine({
     }
     hasSentFirstChunkRef.current = false;
     setMicSettings(null);
+    setIsEngineReady(false);
     if (audioContextRef.current) {
       audioContextRef.current.close().catch(() => {});
       audioContextRef.current = null;
@@ -573,6 +576,7 @@ export function useAudioEngine({
     setIsSignalLost,
     micSettings,
     isCalibrating,
+    isEngineReady,
     noiseFloorDb,
     noiseReductionActive,
     destRef,

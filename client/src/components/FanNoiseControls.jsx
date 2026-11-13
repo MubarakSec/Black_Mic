@@ -70,7 +70,7 @@ export default function FanNoiseControls({
               fontFamily: 'JetBrains Mono',
               fontSize: '0.8rem',
               textAlign: 'center',
-              outline: 'none',
+              outline: '2px solid var(--accent-1)', outlineOffset: '1px',
             }}
           />
           <span style={{ opacity: 0.5, fontSize: '0.72rem' }}>dBFS</span>

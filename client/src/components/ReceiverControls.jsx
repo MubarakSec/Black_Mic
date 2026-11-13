@@ -26,6 +26,7 @@ export default function ReceiverControls({
   onToggleMonitoring,
   onStartAudioRecording,
   onStopAudioRecording,
+  isEngineReady = false,
 }) {
   return (
     <>
@@ -76,7 +77,8 @@ export default function ReceiverControls({
         <button
           className={`btn-control ${isMonitoring ? 'is-receiver-active' : ''}`}
           onClick={onToggleMonitoring}
-          disabled={!isPhoneConnected}
+          disabled={!isPhoneConnected || !isEngineReady}
+          title={isEngineReady ? 'Toggle live PC speaker feedback' : 'Enable receiver audio first'}
         >
           {isMonitoring ? 'Feedback Active' : 'Enable Live Feedback'}
         </button>
@@ -85,7 +87,8 @@ export default function ReceiverControls({
           <button
             className="btn-control is-sender-soft"
             onClick={onStartAudioRecording}
-            disabled={!isPhoneConnected}
+            disabled={!isEngineReady || !isPhoneConnected}
+            title={isEngineReady ? 'Start recording' : 'Enable receiver audio first'}
           >
             <Mic size={16} /> Record Audio Only
           </button>

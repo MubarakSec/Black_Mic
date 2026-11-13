@@ -70,7 +70,7 @@ export function useRecording({ destRef, addLog }) {
       }
       const url = URL.createObjectURL(blob);
       const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
-      const recordingId = Date.now();
+      const recordingId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
       setRecordings(prev => [{
         id: recordingId, url, timestamp: new Date().toLocaleTimeString(),
         duration: 'Audio only', size: `${sizeMB} MB`, mimeType,
