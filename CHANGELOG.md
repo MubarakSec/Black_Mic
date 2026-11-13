@@ -1,5 +1,19 @@
 # Changelog
 
+## 1.2.0 — 2026-11-13
+
+USB-first mode. The phone now connects exclusively over USB by default.
+
+### Added
+- `GET /usb-status` endpoint (`server/usb-status.js`): adb availability, per-device state (`device`/`unauthorized`/`none`/`missing`), ready flag, 5 s cache. Unit-tested.
+- `start.sh` USB mode is now the default: binds `127.0.0.1`, runs `adb reverse` per attached device, guides through unauthorized/missing-phone states, `--unreverse` cleanup flag, `--lan` opt-out with plain-HTTP mic warning, `.server.log` rotation at 1 MB.
+- Client: `useUsbStatus` hook + live USB badge in the console header (green/amber/red). Secure-context banner when the page is opened over non-HTTPS LAN origins.
+- vite dev proxy now covers `/usb-status` and `/healthz`.
+
+### Changed
+- README quick start rewritten for USB: adb + `adb reverse` gives the phone `localhost` access as a secure context — phone mic works with **no HTTPS certificates**.
+- `start.sh --help` output; launcher opens the browser at `localhost:3001` in USB mode.
+
 ## 1.1.0 — 2026-11-13
 
 Hardening, performance, and tooling milestone. No protocol changes.
