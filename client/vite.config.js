@@ -31,6 +31,14 @@ export default defineConfig(({ mode }) => {
           target: proxyTarget,
           ws: true,
           secure: false // Bypass self-signed certificate warnings in dev
+        },
+        '/usb-status': {
+          target: proxyTarget,
+          secure: false
+        },
+        '/healthz': {
+          target: proxyTarget,
+          secure: false
         }
       }
     }

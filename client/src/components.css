@@ -355,3 +355,38 @@
     width: 100%;
   }
 }
+
+.console-header-pills {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.usb-pill {
+  font-size: 0.75rem;
+  font-family: 'JetBrains Mono', monospace;
+  padding: 0.25rem 0.5rem;
+  border-radius: 4px;
+  border: 1px solid var(--panel-border);
+  white-space: nowrap;
+}
+
+.usb-pill--ok {
+  color: #00f58c;
+  border-color: rgba(0, 245, 140, 0.4);
+  background: rgba(0, 245, 140, 0.08);
+}
+
+.usb-pill--warn {
+  color: #ffc857;
+  border-color: rgba(255, 200, 87, 0.4);
+  background: rgba(255, 200, 87, 0.08);
+}
+
+.usb-pill--bad {
+  color: #ff4d4d;
+  border-color: rgba(255, 77, 77, 0.4);
+  background: rgba(255, 77, 77, 0.08);
+}

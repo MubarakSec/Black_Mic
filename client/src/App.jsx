@@ -6,6 +6,7 @@ import SignalLostOverlay from './components/SignalLostOverlay';
 import StudioConsole from './components/StudioConsole';
 import { useRecording } from './hooks/useRecording';
 import { useLogBuffer } from './hooks/useLogBuffer';
+import { useUsbStatus } from './hooks/useUsbStatus';
 import { useAudioEngine } from './hooks/useAudioEngine';
 import { useMicrophoneDevices } from './hooks/useMicrophoneDevices';
 import { useSocketConnection } from './hooks/useSocketConnection';
@@ -59,6 +60,7 @@ function App() {
     );
   });
   const { logs, addLog } = useLogBuffer();
+  const usbStatus = useUsbStatus();
   const [status, setStatus] = useState('Waiting to connect...');
   const [startingRole, setStartingRole] = useState(null);
   const [startError, setStartError] = useState(null);
@@ -294,6 +296,7 @@ function App() {
       <StudioConsole
         role={role}
         roomId={roomId}
+        usbStatus={usbStatus}
         status={status}
         roomState={roomState}
         isPhoneConnected={Boolean(roomState?.senders)}

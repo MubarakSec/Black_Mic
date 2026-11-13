@@ -13,6 +13,7 @@ import { ROLE_SENDER, ROLE_RECEIVER } from '../constants';
 export default function StudioConsole({
   role,
   roomId,
+  usbStatus,
   status,
   roomState,
   isPhoneConnected,
@@ -67,7 +68,7 @@ export default function StudioConsole({
 
   return (
     <div className="console-panel text-center">
-      <ConsoleHeader role={role} roomId={roomId} />
+      <ConsoleHeader role={role} roomId={roomId} usbStatus={usbStatus} />
       <StatusPanel
         status={status}
         role={role}
