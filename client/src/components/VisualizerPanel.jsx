@@ -36,13 +36,15 @@ export default function VisualizerPanel({ role, canvasRef, orbRef, iconRef, vuBa
       </div>
 
       {/* Canvas Spectrum visualizer */}
-      <canvas 
-        ref={canvasRef} 
-        width={520} 
-        height={120} 
-        style={{ 
-          width: '100%', 
-          height: '60px', 
+      <canvas
+        ref={canvasRef}
+        width={520}
+        height={60}
+        role="img"
+        aria-label="Audio frequency visualizer"
+        style={{
+          width: '100%',
+          height: '60px',
           display: 'block', 
           margin: '0.5rem 0 1rem 0', 
           borderRadius: '4px',

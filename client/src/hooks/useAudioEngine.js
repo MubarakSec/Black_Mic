@@ -84,7 +84,13 @@ export function useAudioEngine({
   const vuBarRef = useRef(null);
   const vuLabelRef = useRef(null);
 
-  const startVisualizer = (activeRole) => startVisualizerLoop({
+  const prefersReducedMotion = () =>
+    typeof window !== 'undefined' &&
+    window.matchMedia?.('(prefers-reduced-motion: reduce)').matches;
+
+  const startVisualizer = (activeRole) => {
+    if (prefersReducedMotion()) return;
+    startVisualizerLoop({
     analyserRef,
     canvasRef,
     orbRef,
@@ -93,9 +99,10 @@ export function useAudioEngine({
     vuLabelRef,
     telemetryRef,
     animationRef,
-    canvasDimsRef,
-    activeRole,
-  });
+      canvasDimsRef,
+      activeRole,
+    });
+  };
 
   // Persist settings
   useEffect(() => { writeStoredValue(LS_INPUT_GAIN, inputGain); }, [inputGain]);
@@ -416,12 +423,17 @@ export function useAudioEngine({
     }
     setIsCalibrating(false);
     noiseAnalysisAnalyserRef.current = null;
+    analyserRef.current = null;
+    senderGainNodeRef.current = null;
+    receiverGainNodeRef.current = null;
+    destRef.current = null;
     if (processorRef.current) {
       processorRef.current.port.onmessage = null;
       processorRef.current.disconnect();
       processorRef.current = null;
     }
     if (receiverPlaybackNodeRef.current) {
+      receiverPlaybackNodeRef.current.port.onmessage = null;
       receiverPlaybackNodeRef.current.port.postMessage({ type: 'reset' });
       receiverPlaybackNodeRef.current.disconnect();
       receiverPlaybackNodeRef.current = null;

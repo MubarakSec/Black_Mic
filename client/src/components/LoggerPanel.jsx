@@ -1,6 +1,6 @@
-import React from 'react';
+import React, { memo } from 'react';
 
-export default function LoggerPanel({ logs }) {
+const LoggerPanel = memo(function LoggerPanel({ logs }) {
   return (
     <div className="telemetry-panel">
       <div className="telemetry-header">SYSTEM TELEMETRY LOG</div>
@@ -10,4 +10,6 @@ export default function LoggerPanel({ logs }) {
       </div>
     </div>
   );
-}
+});
+
+export default LoggerPanel;
