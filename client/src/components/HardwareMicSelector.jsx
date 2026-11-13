@@ -5,6 +5,7 @@ export default function HardwareMicSelector({
   selectedDeviceId = '',
   onSelectDevice,
   selectedDeviceRecommendation,
+  restartBusy = false,
 }) {
   if (!availableMics || availableMics.length === 0) return null;
 
@@ -21,6 +22,7 @@ export default function HardwareMicSelector({
       <select
         id="microphone-device-select"
         aria-label="Hardware microphone"
+        disabled={restartBusy}
         value={selectedDeviceId || ''}
         onChange={(e) => onSelectDevice?.(e.target.value)}
         className="slider-input"

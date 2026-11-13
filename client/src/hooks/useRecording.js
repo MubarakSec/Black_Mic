@@ -17,7 +17,6 @@ export function useRecording({ destRef, addLog }) {
   const [recordingSeconds, setRecordingSeconds] = useState(0);
 
   const audioRecorderRef = useRef(null);
-  const audioChunksRef = useRef([]);
   const timerIntervalRef = useRef(null);
   const keepStoppedRecordingRef = useRef(true);
 
@@ -45,24 +44,27 @@ export function useRecording({ destRef, addLog }) {
     const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
       ? 'audio/webm;codecs=opus'
       : 'audio/webm';
-    audioChunksRef.current = [];
+    // Per-recorder closure so a stop→start race can't corrupt takes
+    const chunks = [];
     keepStoppedRecordingRef.current = true;
+    let recorder;
     try {
-      audioRecorderRef.current = new MediaRecorder(audioStream, { mimeType, audioBitsPerSecond: RECORDING_BITRATE_BPS });
+      recorder = new MediaRecorder(audioStream, { mimeType, audioBitsPerSecond: RECORDING_BITRATE_BPS });
     } catch (err) {
       addLog(`❌ Could not start recording: ${err.message}`);
       setIsAudioRecording(false);
       return;
     }
-    audioRecorderRef.current.ondataavailable = (e) => {
-      if (e.data.size > 0) audioChunksRef.current.push(e.data);
+    audioRecorderRef.current = recorder;
+    recorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
     };
-    audioRecorderRef.current.onstop = () => {
-      const blob = new Blob(audioChunksRef.current, { type: mimeType });
+    recorder.onstop = () => {
+      if (audioRecorderRef.current !== recorder) return; // superseded by a newer recorder
+      const blob = new Blob(chunks, { type: mimeType });
       if (!keepStoppedRecordingRef.current) {
         // Disconnected/reset mid-take: discard silently, don't auto-download
         addLog('🧹 Take discarded (session ended).');
-        audioChunksRef.current = [];
         audioRecorderRef.current = null;
         return;
       }
@@ -79,7 +81,6 @@ export function useRecording({ destRef, addLog }) {
       a.href = url;
       a.download = `bms-audio-${recordingId}.webm`;
       a.click();
-      audioChunksRef.current = [];
       audioRecorderRef.current = null;
     };
     audioRecorderRef.current.onerror = () => {

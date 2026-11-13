@@ -46,7 +46,7 @@ export const MICROPHONE_SAMPLE_RATE = 48000;
 export const LATENCY_HINT = 'interactive';
 export const DEFAULT_RECEIVER_BUFFER_MS = 15;
 export const MIN_JITTER_BUFFER_MS = 0;
-export const MAX_JITTER_BUFFER_MS = 500;
+export const MAX_JITTER_BUFFER_MS = 250;
 
 // Alarm and Unlock Sound Parameters
 export const ALARM_INTERVAL_MS = 1200;

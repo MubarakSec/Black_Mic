@@ -215,6 +215,7 @@ export function useSocketConnection({
 
     socket.on('pong-rtt', (startTime) => {
       const rtt = Date.now() - startTime;
+      if (!Number.isFinite(rtt) || rtt < 0) return;
       setLatency(rtt);
     });
 

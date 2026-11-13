@@ -60,6 +60,7 @@ export default function StudioConsole({
   onToggleNoiseReduction,
   onSetNoiseFloor,
   onExportRecording,
+  isSenderRestarting,
   onStartAudioRecording,
   onStopAudioRecording,
   onDisconnect,
@@ -90,6 +91,7 @@ export default function StudioConsole({
 
       {isSender && (
         <SenderControls
+          restartBusy={isSenderRestarting}
           inputGain={inputGain}
           setInputGain={setInputGain}
           channelMode={channelMode}

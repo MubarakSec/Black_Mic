@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import AudioLockOverlay from './components/AudioLockOverlay';
 import InsecureContextBanner from './components/InsecureContextBanner';
 import RoomSelector from './components/RoomSelector';
@@ -65,6 +65,9 @@ function App() {
   const usbStatus = useUsbStatus();
   const [status, setStatus] = useState('Waiting to connect...');
   const [startingRole, setStartingRole] = useState(null);
+  const [isSenderRestarting, setIsSenderRestarting] = useState(false);
+  // Bumped on every teardown; in-flight restarts bail when it changes
+  const teardownNonceRef = useRef(0);
   const [startError, setStartError] = useState(null);
 
   const [remotePhoneGain, setRemotePhoneGain] = useState(1.0);
@@ -174,7 +177,10 @@ function App() {
   const senderRestartPendingRef = useRef(false);
   const [senderRestartNonce, setSenderRestartNonce] = useState(0);
   useEffect(() => {
-    if (role !== ROLE_SENDER) return;
+    if (role !== ROLE_SENDER) {
+      senderRestartGuardRef.current = true;
+      return;
+    }
     if (!senderRestartGuardRef.current) {
       senderRestartGuardRef.current = true;
       return;
@@ -183,13 +189,29 @@ function App() {
       senderRestartPendingRef.current = true;
       return;
     }
+    const nonce = teardownNonceRef.current;
     senderRestartBusyRef.current = true;
+    setIsSenderRestarting(true);
     addLog('🔄 Settings changed. Restarting mic stream...');
     (async () => {
       await cleanupAudio();
-      await startSender();
+      if (teardownNonceRef.current !== nonce) {
+        senderRestartBusyRef.current = false;
+        setIsSenderRestarting(false);
+        return;
+      }
+      const result = await startSender();
+      const tearedDownMidRestart = teardownNonceRef.current !== nonce;
+      if (tearedDownMidRestart) {
+        // Mic was acquired after the user disconnected; drop it immediately
+        await cleanupAudio();
+      }
+      if (!result?.ok && !tearedDownMidRestart) {
+        setStartError(result?.message || 'The phone microphone could not restart.');
+      }
       senderRestartBusyRef.current = false;
-      if (senderRestartPendingRef.current) {
+      setIsSenderRestarting(false);
+      if (senderRestartPendingRef.current && !tearedDownMidRestart) {
         senderRestartPendingRef.current = false;
         setSenderRestartNonce(n => n + 1);
       }
@@ -206,27 +228,18 @@ function App() {
     clearRecordings,
   } = useRecording({ destRef, addLog });
 
-  useEffect(() => {
-    if (!joinError || !role) return;
+  // Shared teardown for manual disconnect and server-rejected joins:
+  // bumps the teardown nonce (aborts in-flight restarts) and clears session state.
+  const teardownSession = useCallback(() => {
+    teardownNonceRef.current += 1;
     finalizeRecordingForDisconnect();
     clearRecordings();
-    cleanupAudio();
-    socketRef.current?.emit('leave-room');
-    setRole(null);
-    setStartError(joinError);
-  }, [cleanupAudio, finalizeRecordingForDisconnect, clearRecordings, joinError, role]);
-
-  const handleDisconnect = () => {
-    addLog('🔌 Disconnecting from studio room...');
-    finalizeRecordingForDisconnect();
     cleanupAudio();
     if (socketRef.current) {
       socketRef.current.emit('leave-room');
       socketRef.current.off('pcm-chunk');
     }
-    clearRecordings();
     setRole(null);
-    setStatus('Waiting to connect...');
     setIsMonitoring(false);
     setUnderruns(0);
     setIsAudioLocked(false);
@@ -234,6 +247,20 @@ function App() {
     hasConnectedOnceRef.current = false;
     setStartError(null);
     clearJoinError();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cleanupAudio, finalizeRecordingForDisconnect, clearRecordings]);
+
+  useEffect(() => {
+    if (!joinError || !role) return;
+    teardownSession();
+    setStatus('Waiting to connect...');
+    setStartError(joinError);
+  }, [joinError, role, teardownSession]);
+
+  const handleDisconnect = () => {
+    addLog('🔌 Disconnecting from studio room...');
+    teardownSession();
+    setStatus('Waiting to connect...');
   };
 
   const handleRemoteGainChange = (e) => {
@@ -279,6 +306,7 @@ function App() {
       setStartError(result?.message || 'The phone microphone could not start.');
       return;
     }
+    senderRestartGuardRef.current = true;
     setRole(ROLE_SENDER);
   };
 
@@ -364,6 +392,7 @@ function App() {
         onToggleNoiseReduction={toggleNoiseReduction}
         onSetNoiseFloor={setManualNoiseFloor}
         onExportRecording={exportRecordingAsWav}
+        isSenderRestarting={isSenderRestarting}
         onStartAudioRecording={startAudioOnlyRecording}
         onStopAudioRecording={stopAudioOnlyRecording}
         onDisconnect={handleDisconnect}

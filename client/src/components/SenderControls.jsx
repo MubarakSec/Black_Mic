@@ -34,6 +34,7 @@ function ProfileCheck({ label, requested, actual }) {
 }
 
 export default function SenderControls({
+  restartBusy = false,
   inputGain,
   setInputGain,
   channelMode,
@@ -57,6 +58,7 @@ export default function SenderControls({
   return (
     <>
       <HardwareMicSelector
+        restartBusy={restartBusy}
         availableMics={availableMics}
         selectedDeviceId={selectedDeviceId}
         onSelectDevice={onSelectDevice}
@@ -86,6 +88,7 @@ export default function SenderControls({
           <button
             className={`btn-control ${audioProfile === PROFILE_STUDIO ? 'is-sender-active' : ''}`}
             onClick={() => setAudioProfile(PROFILE_STUDIO)}
+            disabled={restartBusy}
             aria-pressed={audioProfile === PROFILE_STUDIO}
             style={{ flex: '1', padding: '0.4rem 0' }}
           >
@@ -94,6 +97,7 @@ export default function SenderControls({
           <button
             className={`btn-control ${audioProfile === PROFILE_RAW ? 'is-sender-active' : ''}`}
             onClick={() => setAudioProfile(PROFILE_RAW)}
+            disabled={restartBusy}
             aria-pressed={audioProfile === PROFILE_RAW}
             style={{ flex: '1', padding: '0.4rem 0' }}
           >
@@ -102,6 +106,7 @@ export default function SenderControls({
           <button
             className={`btn-control ${audioProfile === PROFILE_CLEAN ? 'is-sender-active' : ''}`}
             onClick={() => setAudioProfile(PROFILE_CLEAN)}
+            disabled={restartBusy}
             aria-pressed={audioProfile === PROFILE_CLEAN}
             style={{ flex: '1', padding: '0.4rem 0' }}
           >
@@ -110,6 +115,7 @@ export default function SenderControls({
           <button
             className={`btn-control ${audioProfile === PROFILE_FAN ? 'is-sender-active' : ''}`}
             onClick={() => setAudioProfile(PROFILE_FAN)}
+            disabled={restartBusy}
             aria-pressed={audioProfile === PROFILE_FAN}
             style={{ flex: '1', padding: '0.4rem 0' }}
           >
@@ -118,6 +124,7 @@ export default function SenderControls({
           <button
             className={`btn-control ${audioProfile === PROFILE_CALL ? 'is-sender-active' : ''}`}
             onClick={() => setAudioProfile(PROFILE_CALL)}
+            disabled={restartBusy}
             aria-pressed={audioProfile === PROFILE_CALL}
             style={{ flex: '1', padding: '0.4rem 0' }}
           >
@@ -127,7 +134,7 @@ export default function SenderControls({
       </div>
 
       <div style={{ fontSize: '0.73rem', opacity: 0.55, marginTop: '0.2rem', textAlign: 'center', fontStyle: 'italic' }}>
-        {PROFILE_LABELS[audioProfile]}
+        {restartBusy ? 'Restarting microphone…' : PROFILE_LABELS[audioProfile]}
       </div>
 
       <div className="channel-mode-row">
@@ -136,6 +143,7 @@ export default function SenderControls({
           <button
             className={`btn-control ${channelMode === CHANNEL_MODE_MONO ? 'is-sender-active' : ''}`}
             onClick={() => setChannelMode(CHANNEL_MODE_MONO)}
+            disabled={restartBusy}
             aria-pressed={channelMode === CHANNEL_MODE_MONO}
           >
             MONO
@@ -143,6 +151,7 @@ export default function SenderControls({
           <button
             className={`btn-control ${channelMode === CHANNEL_MODE_STEREO ? 'is-receiver-active' : ''}`}
             onClick={() => setChannelMode(CHANNEL_MODE_STEREO)}
+            disabled={restartBusy}
             aria-pressed={channelMode === CHANNEL_MODE_STEREO}
           >
             STEREO
