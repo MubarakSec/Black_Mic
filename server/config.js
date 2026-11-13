@@ -1,7 +1,7 @@
 'use strict';
 
 const DEFAULT_PORT = 3001;
-const DEFAULT_MAX_SOCKET_PAYLOAD_MB = 5;
+const DEFAULT_MAX_SOCKET_PAYLOAD_MB = 1;
 const PRODUCTION_ENV = 'production';
 
 function readAllowedOrigins(value, environment) {
