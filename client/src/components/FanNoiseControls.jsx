@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { MAX_NOISE_FLOOR_DB, MIN_NOISE_FLOOR_DB } from '../constants';
 
 export default function FanNoiseControls({
@@ -10,20 +10,18 @@ export default function FanNoiseControls({
   onToggleNoiseReduction,
   onSetNoiseFloor,
 }) {
-  const [floorInput, setFloorInput] = useState('');
-
-  useEffect(() => {
-    if (noiseFloorDb === null) return;
-    setFloorInput(String(noiseFloorDb));
-  }, [noiseFloorDb]);
+  // The draft exists only while editing; otherwise derive from the prop.
+  const [floorDraft, setFloorDraft] = useState(null);
+  const floorInput = floorDraft ?? (noiseFloorDb === null ? '' : String(noiseFloorDb));
 
   const handleFloorBlur = () => {
-    const parsed = parseFloat(floorInput);
+    const parsed = Number.parseFloat(floorInput);
     if (!Number.isFinite(parsed) || !onSetNoiseFloor) {
-      setFloorInput(String(noiseFloorDb));
+      setFloorDraft(null);
       return;
     }
     onSetNoiseFloor(parsed);
+    setFloorDraft(null);
   };
 
   const handleFloorKeyDown = (event) => {
@@ -55,7 +53,7 @@ export default function FanNoiseControls({
           <input
             type="number"
             value={floorInput}
-            onChange={(event) => setFloorInput(event.target.value)}
+            onChange={(event) => setFloorDraft(event.target.value)}
             onBlur={handleFloorBlur}
             onKeyDown={handleFloorKeyDown}
             step="0.1"
