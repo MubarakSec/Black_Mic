@@ -43,5 +43,6 @@ Binary frames:
 - **HTTPS:** if `server.key` + `server.cert` exist next to `server.js`, HTTPS is used (required for phone mic access over LAN). Otherwise plain HTTP.
 - **Graceful shutdown:** on fatal process errors or signals, sockets close, the HTTP server drains, and all virtual sinks are unloaded.
 - **Health:** `GET /healthz` → `{ ok, uptimeSec, activeRooms }`.
+- **USB diagnostics:** `GET /usb-status` → `{ available, state, devices, ready, checkedAt }` where `state` ∈ `device | unauthorized | none | missing`. Cached for 5 s. `state: "unauthorized"` means the phone must accept the USB debugging prompt.
 - **Logs:** set `BMS_LOG_LEVEL=debug` for pacat/init tracing.
 - **Environment:** see the README "Environment variables" table for the full `BMS_*` list.
