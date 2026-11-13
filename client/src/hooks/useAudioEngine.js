@@ -264,6 +264,8 @@ export function useAudioEngine({
           noiseFloorRms: noiseFloorDb === null ? null : Math.pow(10, noiseFloorDb / 20),
         }
       });
+      const senderSampleRate = audioContextRef.current.sampleRate;
+      const senderChannelCount = channelMode === CHANNEL_MODE_STEREO ? CHANNEL_STEREO : CHANNEL_MONO;
       processorRef.current = workletNode;
 
       connectProfileInput({
@@ -286,6 +288,12 @@ export function useAudioEngine({
       workletNode.connect(audioContextRef.current.destination);
 
       workletNode.port.onmessage = (e) => {
+        if (!audioContextRef.current) {
+          // Audio context torn down (restart/disconnect): recycle and bail
+          const recycleBuffer = e.data?.buffer;
+          if (recycleBuffer) workletNode.port.postMessage(recycleBuffer, [recycleBuffer]);
+          return;
+        }
         const payload = e.data;
         const processedBuffer = payload.buffer || payload;
 
@@ -304,8 +312,8 @@ export function useAudioEngine({
         }
 
         // Pack into raw binary: [uint16: magic][uint32: sampleRate][uint8: channelCount][PCM data]
-        const sampleRateVal = audioContextRef.current.sampleRate;
-        const channelCountVal = channelMode === CHANNEL_MODE_STEREO ? CHANNEL_STEREO : CHANNEL_MONO;
+        const sampleRateVal = senderSampleRate;
+        const channelCountVal = senderChannelCount;
 
         const packedBuffer = new ArrayBuffer(HEADER_BYTE_LENGTH + processedBuffer.byteLength);
         const headerView = new DataView(packedBuffer, 0, HEADER_BYTE_LENGTH);
@@ -373,9 +381,12 @@ export function useAudioEngine({
       destRef.current = audioContextRef.current.createMediaStreamDestination();
       analyserRef.current.connect(destRef.current);
 
+      const monitorLimiter = createPeakLimiter(audioContextRef.current);
+      analyserRef.current.connect(monitorLimiter);
+
       receiverGainNodeRef.current = audioContextRef.current.createGain();
       receiverGainNodeRef.current.gain.value = outputVolume;
-      analyserRef.current.connect(receiverGainNodeRef.current);
+      monitorLimiter.connect(receiverGainNodeRef.current);
 
       if (isMonitoring) {
         receiverGainNodeRef.current.connect(audioContextRef.current.destination);
@@ -406,6 +417,7 @@ export function useAudioEngine({
     setIsCalibrating(false);
     noiseAnalysisAnalyserRef.current = null;
     if (processorRef.current) {
+      processorRef.current.port.onmessage = null;
       processorRef.current.disconnect();
       processorRef.current = null;
     }
