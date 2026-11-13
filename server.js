@@ -26,6 +26,25 @@ const {
 const app = express();
 const INVALID_ROOM_CODE = 'INVALID_ROOM';
 const INVALID_ROLE_CODE = 'INVALID_ROLE';
+const RATE_LIMITED_CODE = 'RATE_LIMITED';
+const JOIN_WINDOW_MS = 10_000;
+const JOIN_MAX_ATTEMPTS = 10;
+const joinAttempts = new Map();
+
+function isJoinRateLimited(socketId, now = Date.now()) {
+  const attempts = (joinAttempts.get(socketId) || []).filter(t => now - t < JOIN_WINDOW_MS);
+  if (attempts.length >= JOIN_MAX_ATTEMPTS) {
+    joinAttempts.set(socketId, attempts);
+    return true;
+  }
+  attempts.push(now);
+  joinAttempts.set(socketId, attempts);
+  return false;
+}
+
+function clearJoinAttempts(socketId) {
+  joinAttempts.delete(socketId);
+}
 app.use(cors({ origin: config.corsOrigin }));
 app.use(express.static(path.join(__dirname, 'client/dist')));
 
@@ -98,6 +117,15 @@ io.on('connection', (socket) => {
   logger.info('Client connected:', socket.id);
 
   socket.on('join-room', (roomId, role, acknowledge) => {
+    if (isJoinRateLimited(socket.id)) {
+      logger.warn(`Rate-limited join-room from ${socket.id}`);
+      respondToJoin(acknowledge, {
+        ok: false,
+        code: RATE_LIMITED_CODE,
+        message: 'Too many join attempts. Wait a few seconds and try again.',
+      });
+      return;
+    }
     if (!isValidRoomId(roomId)) {
       logger.warn(`Blocked invalid join-room: "${roomId}" from ${socket.id}`);
       respondToJoin(acknowledge, {
@@ -216,6 +244,7 @@ io.on('connection', (socket) => {
 
   socket.on('disconnect', () => {
     logger.info('Client disconnected:', socket.id);
+    clearJoinAttempts(socket.id);
     leaveCurrentRoom(socket);
   });
 });
