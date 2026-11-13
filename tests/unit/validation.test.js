@@ -129,3 +129,68 @@ describe('PCM Chunk Normalization (Client)', () => {
     expect(normalizePcmPayload(payload2)).toBe(null);
   });
 });
+
+// ---------------------------------------------------------------------------
+// Server-side PCM normalization (uses createRequire for the CJS module)
+// ---------------------------------------------------------------------------
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+const serverValidation = require('../../server/socket-validation');
+const { normalizePcmChunk: normalizeServerPcmChunk, PCM_MAGIC: SERVER_PCM_MAGIC, HEADER_BYTE_LENGTH } = serverValidation;
+
+function createServerPcmPacket({ sampleRate = 48000, channelCount = 1, payloadBytes = 2048 } = {}) {
+  const packet = Buffer.alloc(HEADER_BYTE_LENGTH + payloadBytes);
+  packet.writeUInt16LE(SERVER_PCM_MAGIC, 0);
+  packet.writeUInt32LE(sampleRate, 2);
+  packet.writeUInt8(channelCount, 6);
+  return packet;
+}
+
+describe('Server PCM validation (normalizePcmChunk)', () => {
+  it('accepts a well-formed mono packet', () => {
+    const result = normalizeServerPcmChunk(createServerPcmPacket());
+    expect(result).not.toBeNull();
+    expect(result.sampleRate).toBe(48000);
+    expect(result.channelCount).toBe(1);
+    expect(result.buffer.byteLength).toBe(2048);
+  });
+
+  it('accepts Buffers, ArrayBuffers, and typed-array views', () => {
+    const packet = createServerPcmPacket();
+    expect(normalizeServerPcmChunk(packet)).not.toBeNull();
+    expect(normalizeServerPcmChunk(packet.buffer.slice(packet.byteOffset, packet.byteOffset + packet.byteLength))).not.toBeNull();
+    expect(normalizeServerPcmChunk(new Uint8Array(packet))).not.toBeNull();
+  });
+
+  it('rejects a bad magic number', () => {
+    const packet = createServerPcmPacket();
+    packet.writeUInt16LE(0xDEAD, 0);
+    expect(normalizeServerPcmChunk(packet)).toBeNull();
+  });
+
+  it('rejects out-of-range sample rates', () => {
+    expect(normalizeServerPcmChunk(createServerPcmPacket({ sampleRate: 4000 }))).toBeNull();
+    expect(normalizeServerPcmChunk(createServerPcmPacket({ sampleRate: 200000 }))).toBeNull();
+  });
+
+  it('rejects invalid channel counts', () => {
+    expect(normalizeServerPcmChunk(createServerPcmPacket({ channelCount: 3 }))).toBeNull();
+    expect(normalizeServerPcmChunk(createServerPcmPacket({ channelCount: 0 }))).toBeNull();
+  });
+
+  it('rejects payloads whose length is not frame-aligned', () => {
+    expect(normalizeServerPcmChunk(createServerPcmPacket({ payloadBytes: 2049 }))).toBeNull();
+  });
+
+  it('rejects empty and non-binary payloads', () => {
+    expect(normalizeServerPcmChunk(Buffer.alloc(4))).toBeNull();
+    expect(normalizeServerPcmChunk('not a buffer')).toBeNull();
+    expect(normalizeServerPcmChunk(null)).toBeNull();
+  });
+
+  it('rejects oversized payloads', () => {
+    const packet = createServerPcmPacket({ payloadBytes: 2 * 1024 * 1024 });
+    expect(normalizeServerPcmChunk(packet)).toBeNull();
+  });
+});

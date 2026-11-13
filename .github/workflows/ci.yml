@@ -44,3 +44,31 @@ jobs:
           for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/ > /tmp/preview.html && break; sleep 0.5; done
           grep -q '<div id="root">' /tmp/preview.html
           kill $(cat /tmp/preview.pid) || true
+
+  e2e-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - uses: actions/setup-node@cdca7365b2dadb8aad0a33bc7601856ffabcc48e # v4.3.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            client/package-lock.json
+
+      - name: Install dependencies
+        run: |
+          npm ci
+          npm --prefix client ci
+
+      - name: Build client
+        run: npm --prefix client run build
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Boot smoke test
+        run: npx playwright test tests/e2e/smoke.spec.js
