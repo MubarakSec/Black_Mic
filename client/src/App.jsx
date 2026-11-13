@@ -185,7 +185,7 @@ function App() {
     finalizeRecordingForDisconnect();
     cleanupAudio();
     if (socketRef.current) {
-      socketRef.current.emit('leave-room', roomId);
+      socketRef.current.emit('leave-room');
       socketRef.current.off('pcm-chunk');
     }
     clearRecordings();
