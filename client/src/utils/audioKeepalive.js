@@ -102,14 +102,14 @@ export function createAudioKeepalive() {
       try {
         oscillator.stop();
         oscillator.disconnect();
-      } catch (_) {}
+      } catch {}
       oscillator = null;
     }
 
     if (gainNode) {
       try {
         gainNode.disconnect();
-      } catch (_) {}
+      } catch {}
       gainNode = null;
     }
   }
