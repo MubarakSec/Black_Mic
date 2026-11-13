@@ -11,7 +11,7 @@ import { useAudioEngine } from './hooks/useAudioEngine';
 import { useMicrophoneDevices } from './hooks/useMicrophoneDevices';
 import { useSocketConnection } from './hooks/useSocketConnection';
 import { isValidRoomId } from './utils/socketValidation';
-import { readClampedNumber, writeStoredValue } from './utils/storage';
+import { readClampedNumber, readStoredPattern, writeStoredValue } from './utils/storage';
 import {
   DEFAULT_ROOM_ID,
   LS_ROOM_ID,
@@ -30,6 +30,7 @@ import {
   PROFILE_FAN,
   PROFILE_CALL,
   PROFILE_STUDIO,
+  ROOM_ID_VALIDATOR_REGEX,
 } from './constants';
 import './index.css';
 import './components.css';
@@ -48,7 +49,7 @@ function readStoredEnum(key, fallback, validValues) {
 
 function App() {
   const [role, setRole] = useState(null);
-  const [roomId, setRoomId] = useState(() => localStorage.getItem(LS_ROOM_ID) || DEFAULT_ROOM_ID);
+  const [roomId, setRoomId] = useState(() => readStoredPattern(LS_ROOM_ID, ROOM_ID_VALIDATOR_REGEX, DEFAULT_ROOM_ID));
   const [channelMode, setChannelMode] = useState(() => readStoredEnum(LS_CHANNEL_MODE, CHANNEL_MODE_MONO, VALID_CHANNEL_MODES));
   const [audioProfile, setAudioProfile] = useState(() => readStoredEnum(LS_AUDIO_PROFILE, PROFILE_STUDIO, VALID_AUDIO_PROFILES));
   const [jitterBufferMs, setJitterBufferMs] = useState(() => {
@@ -167,17 +168,34 @@ function App() {
   });
 
   // Restart the sender pipeline when channel mode, profile, or mic device changes.
-  // First render is skipped so we don't immediately restart a freshly-started sender.
+  // Serialized: at most one restart in flight; rapid toggles coalesce into one trailing restart.
   const senderRestartGuardRef = useRef(false);
+  const senderRestartBusyRef = useRef(false);
+  const senderRestartPendingRef = useRef(false);
+  const [senderRestartNonce, setSenderRestartNonce] = useState(0);
   useEffect(() => {
-    if (role === ROLE_SENDER && senderRestartGuardRef.current) {
-      addLog('🔄 Settings changed. Restarting mic stream...');
-      cleanupAudio();
-      startSender();
+    if (role !== ROLE_SENDER) return;
+    if (!senderRestartGuardRef.current) {
+      senderRestartGuardRef.current = true;
+      return;
     }
-    senderRestartGuardRef.current = true;
+    if (senderRestartBusyRef.current) {
+      senderRestartPendingRef.current = true;
+      return;
+    }
+    senderRestartBusyRef.current = true;
+    addLog('🔄 Settings changed. Restarting mic stream...');
+    (async () => {
+      await cleanupAudio();
+      await startSender();
+      senderRestartBusyRef.current = false;
+      if (senderRestartPendingRef.current) {
+        senderRestartPendingRef.current = false;
+        setSenderRestartNonce(n => n + 1);
+      }
+    })();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [channelMode, audioProfile, selectedDeviceId]);
+  }, [channelMode, audioProfile, selectedDeviceId, senderRestartNonce]);
 
   // Recording Hook
   const {
@@ -191,11 +209,12 @@ function App() {
   useEffect(() => {
     if (!joinError || !role) return;
     finalizeRecordingForDisconnect();
+    clearRecordings();
     cleanupAudio();
     socketRef.current?.emit('leave-room');
     setRole(null);
     setStartError(joinError);
-  }, [cleanupAudio, finalizeRecordingForDisconnect, joinError, role]);
+  }, [cleanupAudio, finalizeRecordingForDisconnect, clearRecordings, joinError, role]);
 
   const handleDisconnect = () => {
     addLog('🔌 Disconnecting from studio room...');

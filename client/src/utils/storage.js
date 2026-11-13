@@ -16,6 +16,25 @@ export function readClampedNumber(key, fallback, min, max, parser = Number.parse
   }
 }
 
+export function readStoredValue(key, fallback = '') {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw === null ? fallback : raw;
+  } catch {
+    return fallback;
+  }
+}
+
+export function readStoredPattern(key, pattern, fallback) {
+  try {
+    const raw = localStorage.getItem(key);
+    if (raw !== null && pattern.test(raw)) return raw;
+    return fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 export function readStoredBoolean(key, fallback = false) {
   try {
     const raw = localStorage.getItem(key);

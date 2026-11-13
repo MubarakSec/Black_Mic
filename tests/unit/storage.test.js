@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   readClampedNumber,
   readStoredBoolean,
+  readStoredPattern,
+  readStoredValue,
   writeStoredValue,
 } from '../../client/src/utils/storage';
 
@@ -55,6 +57,20 @@ describe('storage helpers', () => {
       setItem: () => { throw new Error('quota exceeded'); },
     };
     expect(() => writeStoredValue('k', 'v')).not.toThrow();
+  });
+
+  it('readStoredPattern returns whitelisted values or the fallback', () => {
+    store.set('room', 'ROOM1');
+    expect(readStoredPattern('room', /^[A-Z0-9]{3,12}$/, 'ROOM')).toBe('ROOM1');
+    store.set('room', 'room one!');
+    expect(readStoredPattern('room', /^[A-Z0-9]{3,12}$/, 'ROOM')).toBe('ROOM');
+    expect(readStoredPattern('missing', /^[A-Z0-9]{3,12}$/, 'ROOM')).toBe('ROOM');
+  });
+
+  it('readStoredValue returns raw values with a fallback', () => {
+    expect(readStoredValue('x', 'fb')).toBe('fb');
+    store.set('x', 'hello');
+    expect(readStoredValue('x', 'fb')).toBe('hello');
   });
 
   it('readClampedNumber falls back when storage access throws', () => {
