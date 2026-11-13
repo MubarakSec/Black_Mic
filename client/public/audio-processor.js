@@ -178,7 +178,6 @@ class AudioProcessor extends AudioWorkletProcessor {
     // Once we hit our batch size, send it and swap buffers
     if (this.frameOffset >= BATCH_FRAMES) {
       const bufferToSend = this.currentBuffer;
-      const actualFrames = this.frameOffset;
       
       this.currentBuffer = this.getBufferFromPool();
       this.currentInt16Array = new Int16Array(this.currentBuffer);

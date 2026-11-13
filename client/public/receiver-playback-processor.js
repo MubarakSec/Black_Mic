@@ -63,7 +63,7 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
         return;
       }
       if (message?.type !== 'pcm') return;
-      const { buffer, sampleRate: inputSampleRate, channelCount } = message;
+      const { sampleRate: inputSampleRate, channelCount } = message;
       if (!Number.isFinite(inputSampleRate) || inputSampleRate < 8000 || inputSampleRate > 96000) return;
       if (channelCount !== 1 && channelCount !== 2) return;
       this.enqueuePcm(message);
