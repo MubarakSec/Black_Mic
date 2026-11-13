@@ -3,6 +3,11 @@ const DEFAULT_TARGET_BUFFER_MS = 60;
 const MAX_BUFFER_MS = 250;
 const MS_PER_SECOND = 1000;
 const STEREO_CHANNELS = 2;
+const ADAPT_INTERVAL_MS = 2000;
+const ADAPT_STEP_UP_MS = 10;
+const ADAPT_STEP_DOWN_MS = 5;
+const ADAPT_MAX_MS = 120;
+const ADAPT_SPIKE_COUNT = 3;
 
 function clampSample(sample) {
   if (sample < -1) return -1;
@@ -37,6 +42,13 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
     this.writeIndex = 0;
     this.hasStarted = false;
     this.underruns = 0;
+    // Adaptive jitter: starts at the user's target (the slider is a floor),
+    // raises it in steps when underruns spike, relaxes down when stable.
+    this.userTargetBufferMs = targetBufferMs;
+    this.autoTargetBufferMs = targetBufferMs;
+    this.underrunsAtLastAdapt = 0;
+    this.framesSinceAdapt = 0;
+    this.adaptFrameBudget = Math.round((this.sampleRate * ADAPT_INTERVAL_MS) / MS_PER_SECOND);
 
     this.port.onmessage = (event) => {
       const message = event.data;
@@ -46,6 +58,8 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
       }
       if (message?.type === 'set-target-buffer') {
         const ms = Math.min(message.targetBufferMs, MAX_BUFFER_MS);
+        this.userTargetBufferMs = ms;
+        this.autoTargetBufferMs = ms;
         this.targetBufferFrames = Math.round((this.sampleRate * ms) / MS_PER_SECOND);
         return;
       }
@@ -58,6 +72,27 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
     this.readIndex = 0;
     this.writeIndex = 0;
     this.hasStarted = false;
+    this.underrunsAtLastAdapt = this.underruns;
+    this.framesSinceAdapt = 0;
+  }
+
+  adaptBuffer() {
+    const underrunDelta = this.underruns - this.underrunsAtLastAdapt;
+    this.underrunsAtLastAdapt = this.underruns;
+    this.framesSinceAdapt = 0;
+
+    const floorMs = this.userTargetBufferMs;
+    let targetMs = this.autoTargetBufferMs;
+    if (underrunDelta >= ADAPT_SPIKE_COUNT) {
+      targetMs = Math.min(targetMs + ADAPT_STEP_UP_MS, ADAPT_MAX_MS);
+    } else if (underrunDelta === 0 && targetMs > floorMs) {
+      targetMs = Math.max(targetMs - ADAPT_STEP_DOWN_MS, floorMs);
+    }
+
+    if (targetMs === this.autoTargetBufferMs) return;
+    this.autoTargetBufferMs = targetMs;
+    this.targetBufferFrames = Math.round((this.sampleRate * targetMs) / MS_PER_SECOND);
+    this.port.postMessage({ type: 'buffer-adapted', targetBufferMs: targetMs });
   }
 
   getBufferedFrames() {
@@ -177,6 +212,11 @@ class ReceiverPlaybackProcessor extends AudioWorkletProcessor {
     if (hitUnderrun) {
       this.underruns += 1;
       this.port.postMessage({ type: 'underrun', count: this.underruns });
+    }
+
+    this.framesSinceAdapt += leftOutput.length;
+    if (this.framesSinceAdapt >= this.adaptFrameBudget) {
+      this.adaptBuffer();
     }
 
     return true;

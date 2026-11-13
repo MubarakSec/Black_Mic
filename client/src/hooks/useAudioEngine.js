@@ -354,9 +354,17 @@ export function useAudioEngine({
       });
 
       receiverPlaybackNodeRef.current.port.onmessage = (event) => {
-        if (event.data?.type !== 'underrun') return;
-        if (!Number.isInteger(event.data.count)) return;
-        setUnderruns(event.data.count);
+        const message = event.data;
+        if (message?.type === 'buffer-adapted') {
+          const ms = message.targetBufferMs;
+          if (Number.isFinite(ms)) {
+            addLog(`🎚️ Jitter buffer auto-tuned to ${ms} ms (underrun response)`);
+          }
+          return;
+        }
+        if (message?.type !== 'underrun') return;
+        if (!Number.isInteger(message.count)) return;
+        setUnderruns(message.count);
       };
 
       receiverPlaybackNodeRef.current.connect(analyserRef.current);
