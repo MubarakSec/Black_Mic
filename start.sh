@@ -153,8 +153,10 @@ fi
 
 # ---- Start Node.js server ---------------------------------
 SERVER_PID=""
-if curl "${CURL_TLS_ARGS[@]}" -sf "$SERVER_URL" > /dev/null 2>&1; then
-  echo "[BMS] Server already responding on port $SERVER_PORT; reusing it."
+# Probe /healthz rather than any landing page, so we don't reuse a foreign service
+HEALTH_BODY="$(curl "${CURL_TLS_ARGS[@]}" -sf "$SERVER_URL/healthz" 2>/dev/null || true)"
+if [[ "$HEALTH_BODY" == *'"ok":true'* ]]; then
+  echo "[BMS] Server already responding on port $SERVER_PORT (healthz ok); reusing it."
 else
   echo "[BMS] Starting server on $BMS_HOST:$SERVER_PORT ($([ "$USB_MODE" = true ] && echo 'USB/localhost-only' || echo 'LAN-exposed'))..."
   setsid node "$APP_DIR/server.js" >> "$LOG_FILE" 2>&1 < /dev/null &
@@ -165,7 +167,8 @@ fi
 # ---- Wait for server to be ready (max 3s) -----------------
 READY=false
 for i in {1..10}; do
-  if curl "${CURL_TLS_ARGS[@]}" -sf "$SERVER_URL" > /dev/null 2>&1; then
+  HEALTH_BODY="$(curl "${CURL_TLS_ARGS[@]}" -sf "$SERVER_URL/healthz" 2>/dev/null || true)"
+  if [[ "$HEALTH_BODY" == *'"ok":true'* ]]; then
     READY=true
     break
   fi

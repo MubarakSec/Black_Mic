@@ -3,7 +3,6 @@
 const DEFAULT_PORT = 3001;
 const DEFAULT_HOST = '127.0.0.1';
 const DEFAULT_MAX_SOCKET_PAYLOAD_MB = 1;
-const PRODUCTION_ENV = 'production';
 
 function readAllowedOrigins(value, environment) {
   const origins = String(value || '')
@@ -12,8 +11,8 @@ function readAllowedOrigins(value, environment) {
     .filter(Boolean);
 
   if (origins.length > 0) return origins;
-  if (environment === PRODUCTION_ENV) return false;
-  return true;
+  if (environment === 'development') return true;
+  return false;
 }
 
 function readNumber(value, fallback) {

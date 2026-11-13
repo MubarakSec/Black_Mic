@@ -32,8 +32,11 @@ const RATE_LIMITED_CODE = 'RATE_LIMITED';
 const JOIN_WINDOW_MS = 10_000;
 const JOIN_MAX_ATTEMPTS = 10;
 const joinAttempts = new Map();
+const IP_JOIN_WINDOW_MS = 60_000;
+const IP_JOIN_MAX_ATTEMPTS = 30;
+const ipJoinAttempts = new Map();
 
-function isJoinRateLimited(socketId, now = Date.now()) {
+function isJoinRateLimited(socketId, clientIp, now = Date.now()) {
   const attempts = (joinAttempts.get(socketId) || []).filter(t => now - t < JOIN_WINDOW_MS);
   if (attempts.length >= JOIN_MAX_ATTEMPTS) {
     joinAttempts.set(socketId, attempts);
@@ -41,6 +44,15 @@ function isJoinRateLimited(socketId, now = Date.now()) {
   }
   attempts.push(now);
   joinAttempts.set(socketId, attempts);
+
+  const ipKey = clientIp || 'unknown';
+  const ipAttempts = (ipJoinAttempts.get(ipKey) || []).filter(t => now - t < IP_JOIN_WINDOW_MS);
+  if (ipAttempts.length >= IP_JOIN_MAX_ATTEMPTS) {
+    ipJoinAttempts.set(ipKey, ipAttempts);
+    return true;
+  }
+  ipAttempts.push(now);
+  ipJoinAttempts.set(ipKey, ipAttempts);
   return false;
 }
 
@@ -53,6 +65,15 @@ const PCM_REFILL_BYTES_PER_SEC = 400 * 1024; // >= 96kHz stereo (384 KB/s) with 
 const PCM_WARN_INTERVAL_MS = 5000;
 const HANDSHAKE_WARN_INTERVAL_MS = 5000;
 const MAX_ORIGIN_LOG_LENGTH = 120;
+const MAX_LOG_VALUE_LENGTH = 64;
+
+// Strip control characters so socket-supplied values can't forge log lines
+function sanitizeForLog(value) {
+  return String(value ?? '')
+    .replace(/[\x00-\x1f\x7f]/g, '')
+    .slice(0, MAX_LOG_VALUE_LENGTH);
+}
+
 const pcmBuckets = new Map();
 let lastHandshakeWarn = 0;
 
@@ -106,7 +127,7 @@ const io = new Server(server, {
   cors: { origin: config.corsOrigin, methods: ['GET', 'POST'] },
   allowRequest: (req, callback) => {
     const origin = req.headers.origin;
-    const allowed = isOriginAllowed(origin, req.headers.host, config.corsOrigin);
+    const allowed = isOriginAllowed(origin, req.headers.host, config.corsOrigin, config.host, config.port);
     if (!allowed) {
       const now = Date.now();
       if (now - lastHandshakeWarn >= HANDSHAKE_WARN_INTERVAL_MS) {
@@ -196,11 +217,12 @@ function respondToJoin(acknowledge, payload) {
 }
 
 io.on('connection', (socket) => {
-  logger.info('Client connected:', socket.id);
+  const clientIp = socket.handshake?.address || 'unknown';
+  logger.debug('Client connected:', socket.id, clientIp);
 
   socket.on('join-room', (roomId, role, acknowledge) => {
-    if (isJoinRateLimited(socket.id)) {
-      logger.warn(`Rate-limited join-room from ${socket.id}`);
+    if (isJoinRateLimited(socket.id, clientIp)) {
+      logger.warn(`Rate-limited join-room from ${socket.id} (${sanitizeForLog(clientIp)})`);
       respondToJoin(acknowledge, {
         ok: false,
         code: RATE_LIMITED_CODE,
@@ -209,7 +231,7 @@ io.on('connection', (socket) => {
       return;
     }
     if (!isValidRoomId(roomId)) {
-      logger.warn(`Blocked invalid join-room: "${roomId}" from ${socket.id}`);
+      logger.warn(`Blocked invalid join-room: "${sanitizeForLog(roomId)}" from ${socket.id}`);
       respondToJoin(acknowledge, {
         ok: false,
         code: INVALID_ROOM_CODE,
@@ -218,7 +240,7 @@ io.on('connection', (socket) => {
       return;
     }
     if (!isValidRole(role)) {
-      logger.warn(`Blocked invalid join-room role: "${role}" from ${socket.id}`);
+      logger.warn(`Blocked invalid join-room role: "${sanitizeForLog(role)}" from ${socket.id}`);
       respondToJoin(acknowledge, {
         ok: false,
         code: INVALID_ROLE_CODE,

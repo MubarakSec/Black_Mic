@@ -112,6 +112,14 @@ The noise gate calibration (Capture → 🎯 Calibrate) applies to **FAN and STU
 
 ---
 
+## Security Notes
+
+- **Same-origin only by default.** Socket connections are accepted from the page's own origin (or `BMS_ALLOWED_ORIGINS`). When bound to loopback (the USB default), only loopback origins are accepted — a DNS-rebinding page can't reach the mic relay this way.
+- **A LAN bind (`--lan`) exposes an unauthenticated relay** to every host on your network: anyone who can reach the port can join a room and receive or inject audio. Only use `--lan` on trusted networks, or set `BMS_ALLOWED_ORIGINS`.
+- **The room code is the only secret.** Don't use trivially guessable room IDs on untrusted networks.
+- `GET /healthz` and `GET /usb-status` are intentionally public — they expose no secrets beyond an aggregate device state.
+- Plain `node server.js` without environment config runs closed-by-default (production posture). For open CORS during local development, set `NODE_ENV=development`.
+
 ## Configuration
 
 Defaults match a standard local setup, but everything important is overridable:
