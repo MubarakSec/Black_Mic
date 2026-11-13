@@ -8,9 +8,13 @@
     "dev:server": "node server.js",
     "dev:client": "cd client && npm run dev",
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
-    "test:unit": "vitest run --exclude tests/e2e",
     "test:e2e": "playwright test",
-    "test": "npm run test:unit && npm run test:e2e"
+    "test": "npm run test:unit && npm run test:e2e",
+    "test:unit": "vitest run --exclude tests/e2e",
+    "lint": "npm run lint:server && npm run lint:client",
+    "lint:server": "node --check server.js && for f in server/*.js; do node --check \"$f\"; done",
+    "lint:client": "npm --prefix client run lint",
+    "verify": "npm run lint && npm run test:unit"
   },
   "keywords": [
     "audio",
