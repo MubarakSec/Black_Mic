@@ -30,6 +30,10 @@ export const PROFILE_CLEAN = 'clean';
 export const PROFILE_FAN = 'fan';
 export const PROFILE_CALL = 'call';
 
+// Gain & volume bounds
+export const GAIN_MIN = 0;
+export const GAIN_MAX = 2;
+
 // Telemetry & Watchdog Configuration
 export const TELEMETRY_POLL_INTERVAL_MS = 1000;
 export const WATCHDOG_CHECK_INTERVAL_MS = 1000;

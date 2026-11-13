@@ -6,6 +6,8 @@ import {
   LS_NOISE_FLOOR,
   CHANNEL_MONO,
   CHANNEL_STEREO,
+  GAIN_MIN,
+  GAIN_MAX,
   MICROPHONE_SAMPLE_RATE,
   LATENCY_HINT,
   CALIBRATION_DURATION_MS,
@@ -58,14 +60,15 @@ export function useAudioEngine({
   selectedDeviceId,
   onMicStarted,
 }) {
-  const MAX_INPUT_GAIN = 2.0;
   const [inputGain, setInputGain] = useState(() => {
     const stored = parseFloat(localStorage.getItem(LS_INPUT_GAIN) || '1.0');
-    return Number.isFinite(stored) ? Math.min(stored, MAX_INPUT_GAIN) : 1.0;
+    if (!Number.isFinite(stored)) return 1.0;
+    return Math.max(GAIN_MIN, Math.min(GAIN_MAX, stored));
   });
   const [outputVolume, setOutputVolume] = useState(() => {
     const stored = parseFloat(localStorage.getItem(LS_OUTPUT_VOLUME) || '1.0');
-    return Number.isFinite(stored) ? stored : 1.0;
+    if (!Number.isFinite(stored)) return 1.0;
+    return Math.max(GAIN_MIN, Math.min(GAIN_MAX, stored));
   });
   const [isMonitoring, setIsMonitoring] = useState(false);
   const [underruns, setUnderruns] = useState(0);
