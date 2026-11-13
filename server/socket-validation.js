@@ -2,18 +2,19 @@
 
 const config = require('./config');
 const { logger } = require('./logger');
-
-const ROOM_ID_REGEX = /^[A-Z0-9]{3,12}$/;
-const VALID_ROLES = new Set(['sender', 'receiver']);
-const MIN_SAMPLE_RATE = 8000;
-const MAX_SAMPLE_RATE = 96000;
-const MIN_GAIN = 0;
-const MAX_GAIN = 2;
-const MONO_CHANNELS = 1;
-const STEREO_CHANNELS = 2;
-const PCM_BYTES_PER_SAMPLE = 2;
-const PCM_MAGIC = 0xBC4D;
-const HEADER_BYTE_LENGTH = 7;
+const {
+  PCM_MAGIC,
+  HEADER_BYTE_LENGTH,
+  PCM_BYTES_PER_SAMPLE,
+  ROOM_ID_REGEX,
+  VALID_ROLES,
+  MIN_SAMPLE_RATE,
+  MAX_SAMPLE_RATE,
+  MONO_CHANNEL_COUNT,
+  STEREO_CHANNEL_COUNT,
+  MIN_GAIN,
+  MAX_GAIN,
+} = require('./protocol');
 
 function isPlainObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
@@ -41,8 +42,8 @@ function isValidSampleRate(sampleRate) {
 }
 
 function isValidChannelCount(channelCount) {
-  if (channelCount === MONO_CHANNELS) return true;
-  return channelCount === STEREO_CHANNELS;
+  if (channelCount === MONO_CHANNEL_COUNT) return true;
+  return channelCount === STEREO_CHANNEL_COUNT;
 }
 
 function normalizePcmChunk(chunk) {
