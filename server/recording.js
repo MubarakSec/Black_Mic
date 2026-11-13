@@ -170,7 +170,10 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
     ], { stdio: ['pipe', 'ignore', 'ignore'] });
     s.audioBridge = audioBridge;
     s.isDraining = false;
-    audioBridge.on('error', e => logger.error('Audio bridge error:', e.message));
+    audioBridge.on('error', e => {
+      logger.error('Audio bridge error:', e.message);
+      if (s.audioBridge === audioBridge) resetBridgeState(s, audioBridge);
+    });
     audioBridge.stdin.on('error', err => {
       if (err.code === 'EPIPE') {
         logger.error('EPIPE on pacat. The bridge died, will restart next frame.');
@@ -207,10 +210,15 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
       return;
     }
 
-    if (s.audioBridge.stdin.writable) {
-      const canAcceptMore = s.audioBridge.stdin.write(chunk);
-      if (!canAcceptMore) {
-        s.isDraining = true; // Wait for drain event
+    if (s.audioBridge && s.audioBridge.stdin.writable) {
+      try {
+        const canAcceptMore = s.audioBridge.stdin.write(chunk);
+        if (!canAcceptMore) {
+          s.isDraining = true; // Wait for drain event
+        }
+      } catch (err) {
+        logger.error('Failed to write to pacat stdin:', err.message);
+        resetBridgeState(s, s.audioBridge);
       }
     }
   }
