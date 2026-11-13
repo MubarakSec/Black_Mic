@@ -1,6 +1,6 @@
 # Black Mic Studio
 
-Black Mic Studio is a personal Linux utility for using your phone as a high-quality wireless microphone. It streams uncompressed Int16 PCM audio from a phone browser to a PC and bridges it directly into a virtual PipeWire/PulseAudio system input for OBS or any other desktop app.
+Black Mic Studio is a personal Linux utility for using your phone as a high-quality microphone, connected over USB. It streams uncompressed Int16 PCM audio from a phone browser to a PC and bridges it directly into a virtual PipeWire/PulseAudio system input for OBS or any other desktop app.
 
 This makes your phone's microphone available system-wide on your PC, allowing you to select it as an input device in applications like **Discord, Zoom, OBS Studio, Audacity, and browser calls**.
 
@@ -20,36 +20,66 @@ This makes your phone's microphone available system-wide on your PC, allowing yo
 ## Requirements
 
 - **Linux OS** (with PulseAudio or PipeWire-Pulse compatibility layer).
-- **Node.js** and **npm** installed.
-- **`pactl`** command-line utility.
+- **Node.js** (>= 18) and **npm** installed.
+- **`pactl`** command-line utility (`pulseaudio-utils`).
+- **ADB** (`android-tools-adb`) — required for the default USB mode.
 - A modern phone browser with `AudioWorklet` support.
-- HTTPS or localhost access (needed for browser microphone permission).
-- *Optional:* ADB installed for reverse USB tunneling.
+- A USB cable and **USB debugging** enabled on the phone (Developer Options).
+
+No HTTPS certificates are needed in USB mode: the phone reaches the app as
+`localhost` via `adb reverse`, and browsers treat that as a secure context.
 
 ---
 
-## Quick Start
+## Quick Start (USB)
 
 1. **Install Dependencies:**
    ```bash
-   npm install
+   npm ci
+   (cd client && npm ci)
    ```
 
-2. **Build and Launch:**
+2. **Plug in your phone** and enable **Developer Options → USB debugging**.
+   Accept the "Allow USB debugging" popup when it appears.
+
+3. **Build and Launch:**
    ```bash
    ./start.sh
    ```
+   The launcher verifies node/pactl/adb, binds the server to **localhost only**,
+   and sets `adb reverse tcp:3001 tcp:3001` for every attached device.
 
-3. **Open the App:**
-   Open the URL printed by the launcher on both your PC and your phone. With local cert files present, this is usually:
+4. **Open the App:**
+   On the phone's browser, open the same URL printed by the launcher:
    ```text
-   https://localhost:3001
+   http://localhost:3001
    ```
+   Because of `adb reverse`, that URL resolves to your PC — and because it is
+   localhost, the browser grants microphone access without any certificates.
+   Open the same URL on your PC.
 
-4. **Connect Devices:**
+5. **Connect Devices:**
    - Enter the same **Room ID** code on both devices.
    - Tap **Phone (Microphone)** on the phone.
    - Tap **PC (Receiver)** on the PC.
+
+6. **Cleanup when done (optional):**
+   ```bash
+   ./start.sh --unreverse   # remove the adb reverse tunnel
+   ```
+
+### Fallback: LAN mode
+
+Prefer Wi-Fi over USB? `./start.sh --lan` binds on all interfaces. Note that
+over plain HTTP the phone **will refuse microphone access** — you must place
+`server.key`/`server.cert` next to `server.js` (the launcher then serves
+HTTPS) or accept that USB is the supported path.
+
+### Diagnostics
+
+- `GET /healthz` → `{ ok, uptimeSec, activeRooms }`
+- `GET /usb-status` → adb availability and per-device state
+  (`device` / `unauthorized` / `none` / `missing`, plus `ready`)
 
 ---
 
@@ -72,7 +102,7 @@ Defaults match a standard local setup, but everything important is overridable:
 | Variable | Default | Description |
 | --- | --- | --- |
 | `PORT` | `3001` | HTTP/HTTPS listen port |
-| `BMS_HOST` | all interfaces | Explicit bind address (e.g. `127.0.0.1` or your LAN IP) |
+| `BMS_HOST` | `127.0.0.1` in USB mode, `0.0.0.0` with `--lan` | Explicit bind address override |
 | `BMS_ALLOWED_ORIGINS` | dev: any, prod: same-origin only | Comma-separated CORS allowlist for socket.io and the API |
 | `BMS_MAX_SOCKET_PAYLOAD_MB` | `1` | Max socket.io payload size in MiB |
 | `BMS_EASYEFFECTS_ROOM` | `ROOM` | Room id that triggers automatic EasyEffects RNNoise routing |
@@ -85,7 +115,7 @@ For example, to run on a custom port:
 PORT=4000 ./start.sh
 ```
 
-`GET /healthz` returns `{ ok, uptimeSec, activeRooms }` for monitoring.
+`GET /healthz` and `GET /usb-status` power monitoring and USB diagnostics.
 
 ---
 
