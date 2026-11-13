@@ -67,29 +67,36 @@ Because this tool maps the phone microphone into a PipeWire virtual device, exte
 
 ## Configuration
 
-Defaults match a standard local setup, but you can override configurations with environment variables:
+Defaults match a standard local setup, but everything important is overridable:
 
-```bash
-PORT=3001
-BMS_SERVER_URL=https://localhost:3001
-BMS_MAX_SOCKET_PAYLOAD_MB=5
-BMS_ALLOWED_ORIGINS=https://your-host.example
-```
+| Variable | Default | Description |
+| --- | --- | --- |
+| `PORT` | `3001` | HTTP/HTTPS listen port |
+| `BMS_HOST` | all interfaces | Explicit bind address (e.g. `127.0.0.1` or your LAN IP) |
+| `BMS_ALLOWED_ORIGINS` | dev: any, prod: same-origin only | Comma-separated CORS allowlist for socket.io and the API |
+| `BMS_MAX_SOCKET_PAYLOAD_MB` | `1` | Max socket.io payload size in MiB |
+| `BMS_EASYEFFECTS_ROOM` | `ROOM` | Room id that triggers automatic EasyEffects RNNoise routing |
+| `BMS_LOG_LEVEL` | `info` | `debug` \| `info` \| `warn` \| `error` |
+| `BMS_SERVER_URL` | derived | Vite dev-server proxy target (read by `client/vite.config.js`) |
+| `NODE_ENV` | — | `production` disables permissive CORS defaults |
 
 For example, to run on a custom port:
 ```bash
 PORT=4000 ./start.sh
 ```
 
+`GET /healthz` returns `{ ok, uptimeSec, activeRooms }` for monitoring.
+
 ---
 
 ## Project Structure
 
-- `server.js` - Express and Socket.IO server.
-- `server/recording.js` - PipeWire/PulseAudio virtual sink setup and audio bridge routing.
-- `server/pcm-utils.js` - PCM conversion helpers used by the server audio bridge.
-- `server/config.js` - Environment-backed server configuration.
+- `server.js` - Express and Socket.IO server entry (relay, lifecycle, `/healthz`).
+- `server/` - `config.js` (env), `protocol.js` (wire format), `socket-validation.js`, `room-registry.js`, `recording.js` (virtual sink/bridge), `easyeffects-router.js`, `shutdown-handler.js`, `logger.js`, `pcm-utils.js` — see [`server/README.md`](server/README.md).
 - `client/src/App.jsx` - Main React application logic.
+- `client/src/hooks/` - `useAudioEngine`, `useSocketConnection`, `useRecording`, `useMicrophoneDevices`, `useLogBuffer`.
+- `client/src/utils/` - `protocol.js` (wire mirror), `socketValidation.js`, `storage.js`, `visualizerEngine.js`, `audioProfileGraph.js`, and cue/mic helpers.
 - `client/src/components/` - Presentational UI console panels.
 - `client/public/audio-processor.js` - Sender AudioWorklet PCM encoder.
 - `client/public/receiver-playback-processor.js` - Receiver AudioWorklet PCM playback buffer.
+- See [`client/ARCHITECTURE.md`](client/ARCHITECTURE.md) for the client module map and data flow.
