@@ -100,10 +100,7 @@ export function useAudioEngine({
   const hasConnectedOnceRef = useRef(false);
   const hasSentFirstChunkRef = useRef(false);
   const telemetryRef = useRef({ peakDb: -100, rmsDb: -100, clippedSamples: 0 });
-  const keepaliveRef = useRef(null);
-  if (!keepaliveRef.current) {
-    keepaliveRef.current = createAudioKeepalive();
-  }
+  const [keepalive] = useState(() => createAudioKeepalive());
 
   // Visualizer DOM element refs for high-performance direct rendering
   const canvasRef = useRef(null);
@@ -398,7 +395,7 @@ export function useAudioEngine({
 
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
       await resumeAudioContext();
-      keepaliveRef.current.start(audioContextRef.current);
+      keepalive.start(audioContextRef.current);
       if (typeof onMicStarted === 'function') {
         onMicStarted();
       }
@@ -580,7 +577,7 @@ export function useAudioEngine({
 
   const cleanupAudio = () => {
     releaseWakeLock();
-    keepaliveRef.current?.stop();
+    keepalive.stop();
     if (calibrationTimerRef.current) {
       clearInterval(calibrationTimerRef.current);
       calibrationTimerRef.current = null;
