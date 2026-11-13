@@ -531,7 +531,7 @@ export function useAudioEngine({
     addLog(`🎧 Receiver initialized. Waiting for stream in Room: ${roomId}`);
     try {
       audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)({ latencyHint: LATENCY_HINT });
-      await audioContextRef.current.audioWorklet.addModule(`/receiver-playback-processor.js?t=${Date.now()}`);
+      await audioContextRef.current.audioWorklet.addModule('/receiver-playback-processor.js');
 
       analyserRef.current = audioContextRef.current.createAnalyser();
       receiverPlaybackNodeRef.current = new AudioWorkletNode(audioContextRef.current, 'receiver-playback-processor', {
