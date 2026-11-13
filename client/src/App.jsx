@@ -29,12 +29,13 @@ import {
   PROFILE_CLEAN,
   PROFILE_FAN,
   PROFILE_CALL,
+  PROFILE_STUDIO,
 } from './constants';
 import './index.css';
 import './components.css';
 
 const VALID_CHANNEL_MODES = new Set([CHANNEL_MODE_MONO, CHANNEL_MODE_STEREO]);
-const VALID_AUDIO_PROFILES = new Set([PROFILE_RAW, PROFILE_CLEAN, PROFILE_FAN, PROFILE_CALL]);
+const VALID_AUDIO_PROFILES = new Set([PROFILE_RAW, PROFILE_CLEAN, PROFILE_FAN, PROFILE_CALL, PROFILE_STUDIO]);
 
 function readStoredEnum(key, fallback, validValues) {
   try {
@@ -49,7 +50,7 @@ function App() {
   const [role, setRole] = useState(null);
   const [roomId, setRoomId] = useState(() => localStorage.getItem(LS_ROOM_ID) || DEFAULT_ROOM_ID);
   const [channelMode, setChannelMode] = useState(() => readStoredEnum(LS_CHANNEL_MODE, CHANNEL_MODE_MONO, VALID_CHANNEL_MODES));
-  const [audioProfile, setAudioProfile] = useState(() => readStoredEnum(LS_AUDIO_PROFILE, PROFILE_RAW, VALID_AUDIO_PROFILES));
+  const [audioProfile, setAudioProfile] = useState(() => readStoredEnum(LS_AUDIO_PROFILE, PROFILE_STUDIO, VALID_AUDIO_PROFILES));
   const [jitterBufferMs, setJitterBufferMs] = useState(() => {
     return readClampedNumber(
       LS_RECEIVER_BUFFER_MS,

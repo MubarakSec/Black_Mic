@@ -21,6 +21,7 @@ import {
   PROFILE_RAW,
   PROFILE_FAN,
   PROFILE_CALL,
+  PROFILE_STUDIO,
 } from '../constants';
 import { getAudioSetupError } from '../utils/getAudioSetupError';
 import { createAudioKeepalive } from '../utils/audioKeepalive';
@@ -107,7 +108,7 @@ export function useAudioEngine({
     const hasNoiseFloor = noiseFloorDb !== null && Number.isFinite(noiseFloorDb);
     processorRef.current.port.postMessage({
       type: 'configure-noise-reduction',
-      enabled: audioProfile === PROFILE_FAN && noiseReductionActive && hasNoiseFloor,
+      enabled: (audioProfile === PROFILE_FAN || audioProfile === PROFILE_STUDIO) && noiseReductionActive && hasNoiseFloor,
       noiseFloorRms: hasNoiseFloor ? Math.pow(10, noiseFloorDb / 20) : null,
     });
   }, [audioProfile, noiseFloorDb, noiseReductionActive]);
@@ -259,7 +260,7 @@ export function useAudioEngine({
         channelCountMode: 'explicit',
         processorOptions: {
           isStereo: channelMode === CHANNEL_MODE_STEREO,
-          noiseReductionEnabled: audioProfile === PROFILE_FAN && noiseReductionActive && noiseFloorDb !== null,
+          noiseReductionEnabled: (audioProfile === PROFILE_FAN || audioProfile === PROFILE_STUDIO) && noiseReductionActive && noiseFloorDb !== null,
           noiseFloorRms: noiseFloorDb === null ? null : Math.pow(10, noiseFloorDb / 20),
         }
       });

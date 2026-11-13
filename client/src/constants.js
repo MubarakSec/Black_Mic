@@ -29,6 +29,7 @@ export const PROFILE_RAW = 'raw';
 export const PROFILE_CLEAN = 'clean';
 export const PROFILE_FAN = 'fan';
 export const PROFILE_CALL = 'call';
+export const PROFILE_STUDIO = 'studio';
 
 // Gain & volume bounds
 export const GAIN_MIN = 0;

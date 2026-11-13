@@ -1,9 +1,10 @@
-import { PROFILE_RAW, PROFILE_CLEAN, PROFILE_FAN, PROFILE_CALL, CHANNEL_MODE_MONO, CHANNEL_MODE_STEREO } from '../constants';
+import { PROFILE_STUDIO, PROFILE_RAW, PROFILE_CLEAN, PROFILE_FAN, PROFILE_CALL, CHANNEL_MODE_MONO, CHANNEL_MODE_STEREO } from '../constants';
 import BlackoutControl from './BlackoutControl';
 import FanNoiseControls from './FanNoiseControls';
 import HardwareMicSelector from './HardwareMicSelector';
 
 const PROFILE_LABELS = {
+  [PROFILE_STUDIO]: 'STUDIO — Broadcast voice: 100 Hz HPF + presence/air EQ + compressor',
   [PROFILE_RAW]:   'RAW — No browser DSP, no Android filters',
   [PROFILE_CLEAN]: 'CLEAN — 80 Hz HPF + Compressor (Web Audio)',
   [PROFILE_FAN]:   'FAN — Calibrated gentle reduction (no Android noise suppression)',
@@ -12,6 +13,7 @@ const PROFILE_LABELS = {
 
 // What each profile REQUESTS from Android
 const PROFILE_WANTS = {
+  [PROFILE_STUDIO]: { noiseSuppression: false, echoCancellation: false },
   [PROFILE_RAW]:   { noiseSuppression: false, echoCancellation: false },
   [PROFILE_CLEAN]: { noiseSuppression: false, echoCancellation: false },
   [PROFILE_FAN]:   { noiseSuppression: false, echoCancellation: false },
@@ -81,6 +83,14 @@ export default function SenderControls({
       <div className="channel-mode-row">
         <span>Audio Profile</span>
         <div className="segmented-control" style={{ flex: '2', display: 'flex', gap: '0' }}>
+          <button
+            className={`btn-control ${audioProfile === PROFILE_STUDIO ? 'is-sender-active' : ''}`}
+            onClick={() => setAudioProfile(PROFILE_STUDIO)}
+            aria-pressed={audioProfile === PROFILE_STUDIO}
+            style={{ flex: '1', padding: '0.4rem 0' }}
+          >
+            STUDIO
+          </button>
           <button
             className={`btn-control ${audioProfile === PROFILE_RAW ? 'is-sender-active' : ''}`}
             onClick={() => setAudioProfile(PROFILE_RAW)}
@@ -194,7 +204,7 @@ export default function SenderControls({
       )}
 
       <FanNoiseControls
-        isFanProfile={audioProfile === PROFILE_FAN}
+        isFanProfile={audioProfile === PROFILE_FAN || audioProfile === PROFILE_STUDIO}
         isCalibrating={isCalibrating}
         noiseFloorDb={noiseFloorDb}
         noiseReductionActive={noiseReductionActive}

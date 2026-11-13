@@ -31,12 +31,12 @@ export default function FanNoiseControls({
 
   const reductionStatus = isFanProfile
     ? `Suppressing stationary noise below ${noiseFloorDb} dBFS`
-    : 'Saved calibration applies only in FAN. RAW stays untouched.';
+    : 'Saved calibration applies in FAN and STUDIO. RAW stays untouched.';
 
   return (
     <div style={{ marginTop: '1rem', borderTop: '1px solid rgba(255,255,255,0.07)', paddingTop: '0.75rem' }}>
       <div style={{ fontSize: '0.72rem', opacity: 0.45, marginBottom: '0.4rem', textTransform: 'uppercase', letterSpacing: '0.4px' }}>
-        Fan Noise Reduction
+        Noise Gate
       </div>
       {noiseFloorDb === null ? (
         <button
@@ -45,7 +45,7 @@ export default function FanNoiseControls({
           disabled={isCalibrating}
           style={{ width: '100%', padding: '0.5rem 0' }}
         >
-          {isCalibrating ? '🔇 Calibrating... Stay silent' : '🎯 Calibrate Fan Noise'}
+          {isCalibrating ? '🔇 Calibrating... Stay silent' : '🎯 Calibrate Noise Floor'}
         </button>
       ) : (
         <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', justifyContent: 'center', fontSize: '0.8rem' }}>
