@@ -11,6 +11,8 @@ const MONO_CHANNEL_MAP = 'mono';
 const AUDIO_WORKLET_BATCH_FRAMES = 512;
 const PCM_FLUSH_THRESHOLD_BYTES = AUDIO_WORKLET_BATCH_FRAMES * PCM_BYTES_PER_SAMPLE;
 const PACAT_RESPAWN_COOLDOWN_MS = 1000;
+const DRAIN_WATCHDOG_MS = 1500;
+const PACAT_EXIT_TIMEOUT_MS = 1000;
 const DEFAULT_EASYEFFECTS_ROOM_ID = 'ROOM';
 const rawEasyEffectsRoom = process.env.BMS_EASYEFFECTS_ROOM || DEFAULT_EASYEFFECTS_ROOM_ID;
 const EASYEFFECTS_ROOM_ID = ROOM_ID_REGEX.test(rawEasyEffectsRoom)
@@ -95,62 +97,39 @@ async function initRoom(roomId) {
   const initPromise = (async () => {
     const sinkName = `BMS_${roomId}_Sink`;
     const sourceName = `BlackMic_${roomId}`;
-    const { code: codeSink, out: sinkModuleId } = await pactlRunner([
-      'load-module', 'module-null-sink',
-      `sink_name=${sinkName}`,
-      `channels=${MONO_CHANNEL_COUNT}`,
-      `channel_map=${MONO_CHANNEL_MAP}`,
-      `sink_properties=device.description="BMS Receiver [${roomId}]"`
-    ]);
+    let sinkModuleId = null;
+    let sourceModuleId = null;
+    try {
+      const sinkResult = await pactlRunner([
+        'load-module', 'module-null-sink',
+        `sink_name=${sinkName}`,
+        `channels=${MONO_CHANNEL_COUNT}`,
+        `channel_map=${MONO_CHANNEL_MAP}`,
+        `sink_properties=device.description="BMS Receiver [${roomId}]"`
+      ]);
+      sinkModuleId = sinkResult.out;
 
-    if (codeSink !== 0) {
-      const message = `Failed to create virtual sink for room ${roomId}. Is PipeWire/PulseAudio pactl available?`;
-      logger.error(message);
-      return { ok: false, message };
-    }
+      if (sinkResult.code !== 0) {
+        const message = `Failed to create virtual sink for room ${roomId}. Is PipeWire/PulseAudio pactl available?`;
+        logger.error(message);
+        return { ok: false, message };
+      }
 
-    const { code: codeSource, out: sourceModuleId } = await pactlRunner([
-      'load-module', 'module-remap-source',
-      `source_name=${sourceName}`,
-      `master=${sinkName}.monitor`,
-      `source_properties=device.description="Black Mic"`
-    ]);
+      const sourceResult = await pactlRunner([
+        'load-module', 'module-remap-source',
+        `source_name=${sourceName}`,
+        `master=${sinkName}.monitor`,
+        `source_properties=device.description="Black Mic"`
+      ]);
+      sourceModuleId = sourceResult.out;
 
-    if (codeSource !== 0) {
-      logger.warn(`Failed to create remap source. Rolling back null-sink module.`);
-      await pactlRunner(['unload-module', sinkModuleId]);
-      return { ok: false, message: `Failed to create remap source for room ${roomId}.` };
-    }
+      if (sourceResult.code !== 0) {
+        logger.warn('Failed to create remap source. Rolling back null-sink module.');
+        await pactlRunner(['unload-module', sinkModuleId]);
+        return { ok: false, message: `Failed to create remap source for room ${roomId}.` };
+      }
 
-    if (generation !== getRoomGeneration(roomId)) {
-      await pactlRunner(['unload-module', sourceModuleId]);
-      await pactlRunner(['unload-module', sinkModuleId]);
-      return {
-        ok: false,
-        cancelled: true,
-        message: `Receiver left room ${roomId} before virtual microphone setup completed.`,
-      };
-    }
-
-    sessions[roomId] = { 
-      sinkName, 
-      sinkModuleId,
-      sourceModuleId: codeSource === 0 ? sourceModuleId : null,
-      audioBridge: null, 
-      sampleRate: DEFAULT_SAMPLE_RATE,
-      channelCount: MONO_CHANNEL_COUNT,
-      pcmBufferQueue: [],
-      pcmBufferBytes: 0,
-      isDraining: false
-    };
-    if (roomId === EASYEFFECTS_ROOM_ID) {
-      const routed = await routeEasyEffects(sourceName);
-      const routeStatus = routed ? 'connected' : 'not available';
-      logger.info(`EasyEffects route ${routeStatus}: ${sourceName}`);
-      // Receiver may have left while we were routing; the generation guard
-      // above ran before `sessions[roomId]` was assigned, so re-check now.
       if (generation !== getRoomGeneration(roomId)) {
-        delete sessions[roomId];
         await pactlRunner(['unload-module', sourceModuleId]);
         await pactlRunner(['unload-module', sinkModuleId]);
         return {
@@ -159,9 +138,44 @@ async function initRoom(roomId) {
           message: `Receiver left room ${roomId} before virtual microphone setup completed.`,
         };
       }
+
+      sessions[roomId] = {
+        sinkName,
+        sinkModuleId,
+        sourceModuleId,
+        audioBridge: null,
+        sampleRate: DEFAULT_SAMPLE_RATE,
+        channelCount: MONO_CHANNEL_COUNT,
+        pcmBufferQueue: [],
+        pcmBufferBytes: 0,
+        isDraining: false,
+        drainStartedAt: 0,
+        lastPacatFailureAt: 0,
+      };
+      if (roomId === EASYEFFECTS_ROOM_ID) {
+        const routed = await routeEasyEffects(sourceName);
+        const routeStatus = routed ? 'connected' : 'not available';
+        logger.info(`EasyEffects route ${routeStatus}: ${sourceName}`);
+        if (generation !== getRoomGeneration(roomId)) {
+          delete sessions[roomId];
+          await pactlRunner(['unload-module', sourceModuleId]);
+          await pactlRunner(['unload-module', sinkModuleId]);
+          return {
+            ok: false,
+            cancelled: true,
+            message: `Receiver left room ${roomId} before virtual microphone setup completed.`,
+          };
+        }
+      }
+      logger.info(`Virtual mic ready: Black Mic (modules ${sinkModuleId}, ${sourceModuleId || 'none'})`);
+      return { ok: true };
+    } catch (err) {
+      // Any unexpected throw between load-module calls: don't leak modules
+      logger.error(`initRoom failed for ${roomId}:`, err);
+      if (sourceModuleId) await pactlRunner(['unload-module', sourceModuleId]).catch(() => {});
+      if (sinkModuleId) await pactlRunner(['unload-module', sinkModuleId]).catch(() => {});
+      return { ok: false, message: `Virtual microphone setup failed for room ${roomId}.` };
     }
-    logger.info(`Virtual mic ready: Black Mic (modules ${sinkModuleId}, ${sourceModuleId || 'none'})`);
-    return { ok: true };
   })();
 
   const trackedPromise = initPromise.finally(() => {
@@ -190,13 +204,23 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
   const s = sessions[roomId];
   if (!s) return;
 
-  // Restart bridge if sample rate changes mid-stream
+  // Restart bridge if sample rate changes mid-stream.
+  // Stamps lastPacatFailureAt via resetBridgeState so the respawn
+  // cooldown engages even under a hostile per-chunk rate alternation.
+  // The old bridge is stopped too — it must not keep playing into the sink.
   if (s.audioBridge && s.sampleRate !== sampleRate) {
     logger.info(`Format changed from ${s.sampleRate}Hz to ${sampleRate}Hz. Restarting bridge...`);
-    if (s.audioBridge.stdin.writable) s.audioBridge.stdin.end();
-    s.audioBridge = null;
+    const oldBridge = s.audioBridge;
+    resetBridgeState(s, oldBridge);
+    stopProcess(oldBridge);
   }
 
+  if (s.isDraining && s.drainStartedAt && (Date.now() - s.drainStartedAt) > DRAIN_WATCHDOG_MS) {
+    logger.error(`Room ${roomId}: pacat stdin stalled for ${DRAIN_WATCHDOG_MS}ms; killing and respawning`);
+    const wedged = s.audioBridge;
+    resetBridgeState(s, wedged);
+    if (wedged) wedged.kill('SIGKILL');
+  }
   if (!s.audioBridge && s.lastPacatFailureAt && (Date.now() - s.lastPacatFailureAt) < PACAT_RESPAWN_COOLDOWN_MS) {
     // Cooldown after a dead pacat: drop audio instead of fork-bombing
     s.pcmBufferQueue = [];
@@ -218,7 +242,7 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
     ], { stdio: ['pipe', 'ignore', 'ignore'] });
     s.audioBridge = audioBridge;
     s.isDraining = false;
-    audioBridge.on('spawn', () => { s.lastPacatFailureAt = 0; });
+    audioBridge.on('spawn', () => { if (s.audioBridge === audioBridge) s.lastPacatFailureAt = 0; });
     audioBridge.on('error', e => {
       logger.error('Audio bridge error:', e.message);
       s.lastPacatFailureAt = Date.now();
@@ -235,6 +259,7 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
     audioBridge.stdin.on('drain', () => {
       if (s.audioBridge !== audioBridge) return;
       s.isDraining = false;
+      s.drainStartedAt = 0;
     });
     audioBridge.on('close', (code) => {
       if (s.audioBridge !== audioBridge) return;
@@ -265,7 +290,10 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
       try {
         const canAcceptMore = s.audioBridge.stdin.write(chunk);
         if (!canAcceptMore) {
-          s.isDraining = true; // Wait for drain event
+          if (!s.isDraining) {
+            s.isDraining = true;
+            s.drainStartedAt = Date.now();
+          }
         }
       } catch (err) {
         logger.error('Failed to write to pacat stdin:', err.message);
@@ -286,11 +314,28 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
 // ---------------------------------------------------------------------------
 
 function stopProcess(childProcess) {
-  if (!childProcess) return;
-  if (childProcess.stdin?.writable) {
-    childProcess.stdin.end();
-  }
-  childProcess.kill('SIGTERM');
+  if (!childProcess) return Promise.resolve(false);
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (exited) => {
+      if (settled) return;
+      settled = true;
+      resolve(exited);
+    };
+    const backstop = setTimeout(() => {
+      childProcess.kill('SIGKILL');
+      // Don't wait for the SIGKILL reap; the hard requirement is that the
+      // process gets the signal before we unload the sink underneath it.
+      done(false);
+    }, PACAT_EXIT_TIMEOUT_MS);
+    if (typeof backstop.unref === 'function') backstop.unref();
+    childProcess.once('exit', () => { clearTimeout(backstop); done(true); });
+
+    if (childProcess.stdin?.writable) {
+      childProcess.stdin.end();
+    }
+    childProcess.kill('SIGTERM');
+  });
 }
 
 async function cleanupRoom(roomId) {
@@ -303,11 +348,17 @@ async function cleanupRoom(roomId) {
 
   delete sessions[roomId];
   roomGenerations.delete(roomId);
-  stopProcess(s.audioBridge);
+  await stopProcess(s.audioBridge);
 
   const cleanupPromise = (async () => {
-    if (s.sourceModuleId) await pactlRunner(['unload-module', s.sourceModuleId]);
-    if (s.sinkModuleId) await pactlRunner(['unload-module', s.sinkModuleId]);
+    if (s.sourceModuleId) {
+      const r = await pactlRunner(['unload-module', s.sourceModuleId]);
+      if (r.code !== 0) logger.warn(`unload-module ${s.sourceModuleId} exited ${r.code}`);
+    }
+    if (s.sinkModuleId) {
+      const r = await pactlRunner(['unload-module', s.sinkModuleId]);
+      if (r.code !== 0) logger.warn(`unload-module ${s.sinkModuleId} exited ${r.code}`);
+    }
     logger.info(`Virtual mic unloaded (modules ${s.sinkModuleId}, ${s.sourceModuleId || 'none'})`);
   })();
   const trackedCleanup = cleanupPromise.finally(() => {

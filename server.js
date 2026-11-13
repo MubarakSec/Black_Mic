@@ -31,6 +31,7 @@ const INVALID_ROLE_CODE = 'INVALID_ROLE';
 const RATE_LIMITED_CODE = 'RATE_LIMITED';
 const JOIN_WINDOW_MS = 10_000;
 const JOIN_MAX_ATTEMPTS = 10;
+const MAX_ACTIVE_ROOMS = 50;
 const joinAttempts = new Map();
 const IP_JOIN_WINDOW_MS = 60_000;
 const IP_JOIN_MAX_ATTEMPTS = 30;
@@ -99,6 +100,38 @@ function takePcmBudget(socketId, bytes, now = Date.now()) {
 
 function clearPcmBudget(socketId) {
   pcmBuckets.delete(socketId);
+}
+
+const CONTROL_BUDGET_BYTES = 32;
+const CONTROL_REFILL_PER_SEC = 16;
+const RECEIVER_READY_MIN_INTERVAL_MS = 500;
+const controlBuckets = new Map();
+const receiverReadyAt = new Map();
+
+function takeControlBudget(socketId, now = Date.now()) {
+  let bucket = controlBuckets.get(socketId);
+  if (!bucket) {
+    bucket = { tokens: CONTROL_BUDGET_BYTES, lastRefill: now };
+    controlBuckets.set(socketId, bucket);
+  }
+  const elapsedSec = Math.max(0, (now - bucket.lastRefill) / 1000);
+  bucket.tokens = Math.min(CONTROL_BUDGET_BYTES, bucket.tokens + (elapsedSec * CONTROL_REFILL_PER_SEC));
+  bucket.lastRefill = now;
+  if (bucket.tokens < 1) return false;
+  bucket.tokens -= 1;
+  return true;
+}
+
+function takeReceiverReadyBudget(socketId, now = Date.now()) {
+  const last = receiverReadyAt.get(socketId) || 0;
+  if (now - last < RECEIVER_READY_MIN_INTERVAL_MS) return false;
+  receiverReadyAt.set(socketId, now);
+  return true;
+}
+
+function clearControlBudgets(socketId) {
+  controlBuckets.delete(socketId);
+  receiverReadyAt.delete(socketId);
 }
 app.use(cors({ origin: config.corsOrigin }));
 
@@ -249,6 +282,16 @@ io.on('connection', (socket) => {
       return;
     }
 
+    const isNewRoom = !roomRegistry.getRoomState(roomId) || (roomRegistry.getRoomState(roomId).senders === 0 && roomRegistry.getRoomState(roomId).receivers === 0);
+    if (isNewRoom && roomRegistry.roomCount() >= MAX_ACTIVE_ROOMS) {
+      logger.warn(`Rejected join-room for ${roomId}: room limit (${MAX_ACTIVE_ROOMS}) reached`);
+      respondToJoin(acknowledge, {
+        ok: false,
+        code: 'ROOM_LIMIT',
+        message: 'Server is full. Try again later.',
+      });
+      return;
+    }
     const joinResult = roomRegistry.join(socket.id, roomId, role);
     if (!joinResult.ok) {
       warnSocket(socket, joinResult.message);
@@ -302,6 +345,7 @@ io.on('connection', (socket) => {
     if (!isValidRoomId(roomId)) return;
     if (!isSocketInRoom(socket, roomId)) return;
     if (getSocketRoom(socket)?.role !== 'receiver') return;
+    if (!takeReceiverReadyBudget(socket.id)) return;
     socket.to(roomId).emit('receiver-ready');
   });
 
@@ -331,7 +375,8 @@ io.on('connection', (socket) => {
     if (!isSocketInRoom(socket, roomId)) return;
     if (getSocketRoom(socket)?.role !== 'receiver') return;
     if (!isValidRemoteCommand(cmd)) return;
-    socket.to(roomId).emit('remote-control', cmd);
+    if (!takeControlBudget(socket.id)) return;
+    socket.to(roomId).emit('remote-control', { ...cmd, roomId });
   });
 
   // Remote control ACK relay (phone -> PC)
@@ -340,7 +385,8 @@ io.on('connection', (socket) => {
     if (!isSocketInRoom(socket, roomId)) return;
     if (getSocketRoom(socket)?.role !== 'sender') return;
     if (!isValidRemoteCommand(cmd)) return;
-    socket.to(roomId).emit('remote-control-ack', cmd);
+    if (!takeControlBudget(socket.id)) return;
+    socket.to(roomId).emit('remote-control-ack', { ...cmd, roomId });
   });
 
   socket.on('ping-rtt', (timestamp) => {
@@ -352,6 +398,7 @@ io.on('connection', (socket) => {
     logger.info('Client disconnected:', socket.id);
     clearJoinAttempts(socket.id);
     clearPcmBudget(socket.id);
+    clearControlBudgets(socket.id);
     leaveCurrentRoom(socket);
   });
 });
