@@ -326,7 +326,7 @@ export function useAudioEngine({
       };
 
       startVisualizer(ROLE_SENDER);
-      setStatus('Broadcasting lossless audio! 🔴');
+      setStatus('Broadcasting uncompressed audio! 🔴');
       addLog('🚀 Native Int16 audio stream active over TCP socket!');
       return { ok: true };
     } catch (e) {

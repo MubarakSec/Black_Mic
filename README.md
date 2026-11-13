@@ -1,6 +1,6 @@
 # Black Mic Studio
 
-Black Mic Studio is a personal Linux utility for using your phone as a high-quality wireless microphone. It streams lossless audio from a phone browser to a PC and bridges it directly into a virtual PipeWire/PulseAudio system input for OBS or any other desktop app.
+Black Mic Studio is a personal Linux utility for using your phone as a high-quality wireless microphone. It streams uncompressed Int16 PCM audio from a phone browser to a PC and bridges it directly into a virtual PipeWire/PulseAudio system input for OBS or any other desktop app.
 
 This makes your phone's microphone available system-wide on your PC, allowing you to select it as an input device in applications like **Discord, Zoom, OBS Studio, Audacity, and browser calls**.
 
@@ -8,7 +8,7 @@ This makes your phone's microphone available system-wide on your PC, allowing yo
 
 ## Features
 
-- **Lossless Audio Streaming:** Captures raw microphone input from the phone and streams it directly to the PC.
+- **Uncompressed Audio Streaming:** Captures raw microphone input from the phone and streams Int16 PCM directly to the PC — no codec latency, no transcoding artifacts.
 - **Low-Latency Voice Bridge:** Relays PCM chunks over WebSockets and maps them to a virtual PipeWire null-sink with a small receiver jitter buffer for smoother speech.
 - **System-Wide Input:** Automatically registers the virtual device on your PC so you can select the phone mic in external applications.
 - **Browser Audio Recording:** Enables receiver-side local audio-only takes.
@@ -21,7 +21,6 @@ This makes your phone's microphone available system-wide on your PC, allowing yo
 
 - **Linux OS** (with PulseAudio or PipeWire-Pulse compatibility layer).
 - **Node.js** and **npm** installed.
-- **ffmpeg** installed.
 - **`pactl`** command-line utility.
 - A modern phone browser with `AudioWorklet` support.
 - HTTPS or localhost access (needed for browser microphone permission).

@@ -301,7 +301,7 @@ export function useSocketConnection({
       if (isFirstChunk) {
         hasConnectedOnceRef.current = true;
         setStatus(STATUS_MESSAGES.receiverStreaming);
-        addLog(`🔊 Receiving lossless Int16 audio at ${sampleRate}Hz!`);
+        addLog(`🔊 Receiving uncompressed Int16 audio at ${sampleRate}Hz!`);
         isFirstChunk = false;
       }
 
