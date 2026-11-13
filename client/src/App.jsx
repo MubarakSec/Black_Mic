@@ -1,9 +1,10 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import AudioLockOverlay from './components/AudioLockOverlay';
 import RoomSelector from './components/RoomSelector';
 import SignalLostOverlay from './components/SignalLostOverlay';
 import StudioConsole from './components/StudioConsole';
 import { useRecording } from './hooks/useRecording';
+import { useLogBuffer } from './hooks/useLogBuffer';
 import { useAudioEngine } from './hooks/useAudioEngine';
 import { useMicrophoneDevices } from './hooks/useMicrophoneDevices';
 import { useSocketConnection } from './hooks/useSocketConnection';
@@ -40,7 +41,7 @@ function App() {
       (value) => Number.parseInt(value, 10),
     );
   });
-  const [logs, setLogs] = useState([]);
+  const { logs, addLog } = useLogBuffer();
   const [status, setStatus] = useState('Waiting to connect...');
   const [startingRole, setStartingRole] = useState(null);
   const [startError, setStartError] = useState(null);
@@ -50,11 +51,6 @@ function App() {
   const [remoteAckMsg, setRemoteAckMsg] = useState(null);
 
   const socketRef = useRef(null);
-
-  const addLog = useCallback((msg) => {
-    console.log(msg);
-    setLogs(prev => [...prev.slice(-6), msg]);
-  }, []);
 
   // Sync basic state to localStorage
   useEffect(() => { localStorage.setItem(LS_ROOM_ID, roomId); }, [roomId]);
