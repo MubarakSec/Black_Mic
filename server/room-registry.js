@@ -100,6 +100,10 @@ function createRoomRegistry() {
     return peekRoleSet(roomId, role)?.size || 0;
   }
 
+  function roomCount() {
+    return roomsById.size;
+  }
+
   function getRoomState(roomId) {
     return {
       roomId,
@@ -114,6 +118,7 @@ function createRoomRegistry() {
     hasRoomMembers,
     join,
     leave,
+    roomCount,
   };
 }
 

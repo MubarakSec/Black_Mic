@@ -77,6 +77,15 @@ process.on('uncaughtException', (err) => {
 
 const roomRegistry = createRoomRegistry();
 
+app.get('/healthz', (_req, res) => {
+  res.set('Cache-Control', 'no-store');
+  res.json({
+    ok: true,
+    uptimeSec: Math.floor(process.uptime()),
+    activeRooms: roomRegistry.roomCount(),
+  });
+});
+
 function emitRoomState(roomId) {
   io.to(roomId).emit('room-state', roomRegistry.getRoomState(roomId));
 }
