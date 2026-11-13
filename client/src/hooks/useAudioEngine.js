@@ -27,6 +27,7 @@ import { createAudioKeepalive } from '../utils/audioKeepalive';
 import { playAlarmBeep, playUnlockBeep } from '../utils/audioCues';
 import { startVisualizerLoop } from '../utils/visualizerEngine';
 import { connectProfileInput, createPeakLimiter } from '../utils/audioProfileGraph';
+import { PCM_MAGIC, HEADER_BYTE_LENGTH } from '../utils/protocol';
 
 export function useAudioEngine({
   role,
@@ -313,8 +314,6 @@ export function useAudioEngine({
         // Pack into raw binary: [uint16: magic][uint32: sampleRate][uint8: channelCount][PCM data]
         const sampleRateVal = audioContextRef.current.sampleRate;
         const channelCountVal = channelMode === CHANNEL_MODE_STEREO ? CHANNEL_STEREO : CHANNEL_MONO;
-        const HEADER_BYTE_LENGTH = 7;
-        const PCM_MAGIC = 0xBC4D;
 
         const packedBuffer = new ArrayBuffer(HEADER_BYTE_LENGTH + processedBuffer.byteLength);
         const headerView = new DataView(packedBuffer, 0, HEADER_BYTE_LENGTH);
