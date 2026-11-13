@@ -4,7 +4,7 @@ import FanNoiseControls from './FanNoiseControls';
 import HardwareMicSelector from './HardwareMicSelector';
 
 const PROFILE_LABELS = {
-  [PROFILE_STUDIO]: 'STUDIO — Broadcast voice: 100 Hz HPF + presence/air EQ + compressor',
+  [PROFILE_STUDIO]: 'STUDIO — Transparent voice: 80 Hz HPF + 1 dB presence + de-hiss (RAW with polish)',
   [PROFILE_RAW]:   'RAW — No browser DSP, no Android filters',
   [PROFILE_CLEAN]: 'CLEAN — 80 Hz HPF + Compressor (Web Audio)',
   [PROFILE_FAN]:   'FAN — Calibrated gentle reduction (no Android noise suppression)',

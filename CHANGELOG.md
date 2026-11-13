@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.3.1 — 2026-11-13
+
+Profile transparency pass.
+
+### Fixed
+- Voice profiles no longer color the signal: STUDIO is now HPF 80 → +1 dB presence @ 3.2 kHz → 2 dB de-hiss cut @ 12 kHz → gentle 2:1 compressor (knee 12, −20 dB threshold). The 12 kHz hiss-boost shelf was replaced with a cut — phone codecs carry hiss, not air.
+- Limiter raised to a safety-only −1.5 dB threshold (was −3 dB/20:1, engaged constantly on hot phone mics — the reason non-RAW profiles sounded crushed).
+- CLEAN compressor softened: 2:1 ratio, 12 dB knee (was 3:1 / 8 dB).
+- STUDIO copy updated (SenderControls label, README table).
+
 ## 1.3.0 — 2026-11-13
 
 Studio voice milestone.

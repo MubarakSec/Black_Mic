@@ -3,30 +3,32 @@ import { PROFILE_CLEAN, PROFILE_FAN, PROFILE_STUDIO } from '../constants';
 // dBFS / millisecond-scale dynamics tuning shared by the voice profiles.
 const HIGHPASS_FREQUENCY_HZ = 80;
 const HIGHPASS_Q = 0.7;
-const VOICE_COMPRESSOR_THRESHOLD_DB = -18;
-const VOICE_COMPRESSOR_KNEE_DB = 8;
-const VOICE_COMPRESSOR_RATIO = 3;
+const VOICE_COMPRESSOR_THRESHOLD_DB = -20;
+const VOICE_COMPRESSOR_KNEE_DB = 12;
+const VOICE_COMPRESSOR_RATIO = 2;
 const VOICE_COMPRESSOR_ATTACK_SEC = 0.005;
 const VOICE_COMPRESSOR_RELEASE_SEC = 0.18;
-const LIMITER_THRESHOLD_DB = -3;
+const LIMITER_THRESHOLD_DB = -1.5;
 const LIMITER_KNEE_DB = 0;
 const LIMITER_RATIO = 20;
 const LIMITER_ATTACK_SEC = 0.002;
 const LIMITER_RELEASE_SEC = 0.08;
-// STUDIO: broadcast-voice tuning. HPF removes rumble, presence peak
-// restores articulation that phone mics lack, air shelf rebuilds top end.
-const STUDIO_HIGHPASS_HZ = 100;
+// Transparent voice tuning: subtract problems, add almost nothing.
+// HPF removes rumble; a whisper of presence lift glues artication;
+// the 12 kHz shelf CUTS codec hiss phone mics carry. No boost where
+// the phone can't already produce real signal.
+const STUDIO_HIGHPASS_HZ = 80;
 const STUDIO_HIGHPASS_Q = 0.71;
 const STUDIO_PRESENCE_HZ = 3200;
-const STUDIO_PRESENCE_DB = 2.5;
+const STUDIO_PRESENCE_DB = 1;
 const STUDIO_PRESENCE_Q = 1.1;
-const STUDIO_AIR_HZ = 12000;
-const STUDIO_AIR_DB = 3;
-const STUDIO_COMP_THRESHOLD_DB = -16;
-const STUDIO_COMP_KNEE_DB = 6;
-const STUDIO_COMP_RATIO = 3;
-const STUDIO_COMP_ATTACK_SEC = 0.01;
-const STUDIO_COMP_RELEASE_SEC = 0.15;
+const STUDIO_DEHISS_HZ = 12000;
+const STUDIO_DEHISS_DB = -2;
+const STUDIO_COMP_THRESHOLD_DB = -20;
+const STUDIO_COMP_KNEE_DB = 12;
+const STUDIO_COMP_RATIO = 2;
+const STUDIO_COMP_ATTACK_SEC = 0.015;
+const STUDIO_COMP_RELEASE_SEC = 0.18;
 
 export function connectProfileInput({ audioContext, source, gainNode, audioProfile }) {
   if (audioProfile === PROFILE_STUDIO) {
@@ -41,10 +43,10 @@ export function connectProfileInput({ audioContext, source, gainNode, audioProfi
     presence.gain.value = STUDIO_PRESENCE_DB;
     presence.Q.value = STUDIO_PRESENCE_Q;
 
-    const air = audioContext.createBiquadFilter();
-    air.type = 'highshelf';
-    air.frequency.value = STUDIO_AIR_HZ;
-    air.gain.value = STUDIO_AIR_DB;
+    const dehiss = audioContext.createBiquadFilter();
+    dehiss.type = 'highshelf';
+    dehiss.frequency.value = STUDIO_DEHISS_HZ;
+    dehiss.gain.value = STUDIO_DEHISS_DB;
 
     const compressor = audioContext.createDynamicsCompressor();
     compressor.threshold.value = STUDIO_COMP_THRESHOLD_DB;
@@ -55,8 +57,8 @@ export function connectProfileInput({ audioContext, source, gainNode, audioProfi
 
     source.connect(highPass);
     highPass.connect(presence);
-    presence.connect(air);
-    air.connect(compressor);
+    presence.connect(dehiss);
+    dehiss.connect(compressor);
     compressor.connect(gainNode);
     return;
   }

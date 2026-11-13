@@ -102,7 +102,7 @@ Because this tool maps the phone microphone into a PipeWire virtual device, exte
 
 | Profile | Chain | Use it for |
 | --- | --- | --- |
-| **STUDIO** (default) | 100 Hz HPF → presence peak (+2.5 dB @ 3.2 kHz) → air shelf (+3 dB @ 12 kHz) → 3:1 compressor → limiter; noise gate available | Broadcast-voice sound from the phone mic |
+| **STUDIO** (default) | 80 Hz HPF → +1 dB presence peak @ 3.2 kHz → 2 dB de-hiss shelf @ 12 kHz → 2:1 compressor; noise gate available | RAW with polish — subtract problems, add almost nothing |
 | RAW | No browser/Android DSP, unity gain path, soft limiter bypassed for full fidelity | External processing, archival |
 | CLEAN | 80 Hz HPF → gentle compressor → limiter | General calls |
 | FAN | HPF + calibrated noise-floor expander (quiet room required) | Fan/environment noise |
