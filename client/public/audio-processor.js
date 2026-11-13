@@ -105,6 +105,7 @@ class AudioProcessor extends AudioWorkletProcessor {
   }
 
   getBufferFromPool() {
+    if (this.bufferPool.length > 64) this.bufferPool.length = 64;
     for (let i = 0; i < this.bufferPool.length; i++) {
       if (this.bufferPool[i].byteLength === this.requiredByteLength) {
         return this.bufferPool.splice(i, 1)[0];
@@ -112,6 +113,7 @@ class AudioProcessor extends AudioWorkletProcessor {
     }
     return new ArrayBuffer(this.requiredByteLength);
   }
+
 
   process(inputs, _outputs, _parameters) {
     const input = inputs[0];
@@ -129,6 +131,13 @@ class AudioProcessor extends AudioWorkletProcessor {
 
     // Merge encoding + telemetry into a single loop
     const monoInput = input[0];
+    for (let ch = 0; ch < input.length; ch++) {
+      const channel = input[ch];
+      if (!channel) continue;
+      for (let i = 0; i < channel.length; i++) {
+        if (!Number.isFinite(channel[i])) channel[i] = 0;
+      }
+    }
 
     if (isMonoDuplicatedToStereo) {
       for (let i = 0; i < channelLength; i++) {

@@ -298,7 +298,12 @@ export function useAudioEngine({
       if (audioProfile !== PROFILE_RAW) senderGainNodeRef.current.connect(limiter);
       outputNode.connect(analyserRef.current);
       outputNode.connect(workletNode);
-      workletNode.connect(audioContextRef.current.destination);
+      // Keep the worklet pulled with a zero-gain path to the destination —
+      // connect()ing the worklet straight to destination replays the mic.
+      const silentPullGain = audioContextRef.current.createGain();
+      silentPullGain.gain.value = 0;
+      workletNode.connect(silentPullGain);
+      silentPullGain.connect(audioContextRef.current.destination);
 
       workletNode.port.onmessage = (e) => {
         if (!audioContextRef.current) {
@@ -491,9 +496,13 @@ export function useAudioEngine({
     const timer = setInterval(() => {
       const timeData = new Float32Array(noiseAnalysisAnalyserRef.current.fftSize);
       noiseAnalysisAnalyserRef.current.getFloatTimeDomainData(timeData);
+      let mean = 0;
+      for (let i = 0; i < timeData.length; i++) mean += timeData[i];
+      mean /= timeData.length;
       let sumSq = 0;
       for (let i = 0; i < timeData.length; i++) {
-        sumSq += timeData[i] * timeData[i];
+        const centered = timeData[i] - mean;
+        sumSq += centered * centered;
       }
       calibrationSamplesRef.current.push(Math.sqrt(sumSq / timeData.length));
       if (calibrationSamplesRef.current.length >= sampleCount) {
