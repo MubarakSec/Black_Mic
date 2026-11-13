@@ -33,3 +33,10 @@ jobs:
 
       - name: Build client
         run: npm --prefix client run build
+
+      - name: Smoke-check built bundle
+        run: |
+          (npm --prefix client run preview -- --port 4173 --host 127.0.0.1 & echo $! > /tmp/preview.pid)
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/ > /tmp/preview.html && break; sleep 0.5; done
+          grep -q '<div id="root">' /tmp/preview.html
+          kill $(cat /tmp/preview.pid) || true

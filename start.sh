@@ -70,6 +70,8 @@ else
   export BMS_HOST="${BMS_HOST:-0.0.0.0}"
 fi
 
+export NODE_ENV="${NODE_ENV:-production}"
+
 PROTOCOL="http"
 CURL_TLS_ARGS=()
 if [ -f "$APP_DIR/server.key" ] && [ -f "$APP_DIR/server.cert" ]; then

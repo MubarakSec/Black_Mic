@@ -136,6 +136,17 @@ PORT=4000 ./start.sh
 
 ---
 
+## Testing
+
+```bash
+npm run verify     # lint + unit tests (fast, safe)
+npm test           # unit + e2e (requires PulseAudio/pactl and Playwright browsers)
+```
+
+The e2e suite (`tests/e2e/studio.spec.js`) launches the real app with Chromium's fake mic and expects virtual-sink setup to succeed — run it on a machine with PulseAudio/PipeWire. CI runs lint, unit tests, client build, and a bundle smoke check.
+
+---
+
 ## Project Structure
 
 - `server.js` - Express and Socket.IO server entry (relay, lifecycle, `/healthz`).

@@ -1,5 +1,7 @@
 const { defineConfig, devices } = require('@playwright/test');
 
+const E2E_URL = process.env.BMS_E2E_URL || 'http://localhost:3001';
+
 module.exports = defineConfig({
   testDir: './tests/e2e',
   timeout: 30000,
@@ -7,7 +9,7 @@ module.exports = defineConfig({
   workers: 1,
   reporter: 'list',
   use: {
-    baseURL: 'https://localhost:3001',
+    baseURL: E2E_URL,
     ignoreHTTPSErrors: true, // Handle self-signed certs
     trace: 'on-first-retry',
     permissions: ['microphone'], // Grant mic permission to fake chrome
@@ -26,9 +28,8 @@ module.exports = defineConfig({
   ],
   webServer: {
     command: 'PORT=3001 node server.js',
-    url: 'https://localhost:3001',
+    url: E2E_URL,
     reuseExistingServer: true,
-    ignoreHTTPSErrors: true,
     timeout: 10000,
   },
 });

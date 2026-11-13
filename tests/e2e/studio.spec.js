@@ -5,18 +5,16 @@ test.describe('Black Mic Studio E2E Streaming Suite', () => {
     // 1. Setup the Receiver Page (PC)
     const receiverContext = await browser.newContext({
       permissions: ['microphone'],
-      ignoreHTTPSErrors: true,
     });
     const receiverPage = await receiverContext.newPage();
-    await receiverPage.goto('https://localhost:3001');
+    await receiverPage.goto('http://localhost:3001');
 
     // 2. Setup the Sender Page (Phone)
     const senderContext = await browser.newContext({
       permissions: ['microphone'],
-      ignoreHTTPSErrors: true,
     });
     const senderPage = await senderContext.newPage();
-    await senderPage.goto('https://localhost:3001');
+    await senderPage.goto('http://localhost:3001');
 
     const testRoomId = 'TEST' + Math.floor(100 + Math.random() * 900);
 
@@ -71,7 +69,7 @@ test.describe('Black Mic Studio E2E Streaming Suite', () => {
 
   test('should show an honest waiting state before a phone connects', async ({ page }) => {
     const testRoomId = 'WAIT' + Math.floor(100 + Math.random() * 900);
-    await page.goto('https://localhost:3001');
+    await page.goto('http://localhost:3001');
     await page.getByLabel('Studio Room ID').fill(testRoomId);
 
     await page.getByRole('button', { name: /PC audio receiver/i }).click();
@@ -95,7 +93,7 @@ test.describe('Black Mic Studio E2E Streaming Suite', () => {
         value: deniedMediaDevices,
       });
     });
-    await page.goto('https://localhost:3001');
+    await page.goto('http://localhost:3001');
 
     await page.getByRole('button', { name: /phone microphone/i }).click();
 
@@ -111,12 +109,12 @@ test.describe('Black Mic Studio E2E Streaming Suite', () => {
     const secondReceiver = await secondContext.newPage();
     const testRoomId = 'DUP' + Math.floor(100 + Math.random() * 900);
 
-    await firstReceiver.goto('https://localhost:3001');
+    await firstReceiver.goto('http://localhost:3001');
     await firstReceiver.getByLabel('Studio Room ID').fill(testRoomId);
     await firstReceiver.getByRole('button', { name: /PC audio receiver/i }).click();
     await expect(firstReceiver.locator('.room-state-strip')).toContainText('PC: 1');
 
-    await secondReceiver.goto('https://localhost:3001');
+    await secondReceiver.goto('http://localhost:3001');
     await secondReceiver.getByLabel('Studio Room ID').fill(testRoomId);
     await secondReceiver.getByRole('button', { name: /PC audio receiver/i }).click();
 
