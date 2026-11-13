@@ -229,6 +229,7 @@ server.on('error', (error) => {
   process.exit(1);
 });
 
-server.listen(config.port, () => {
-  logger.info(`Black Mic Studio server on ${useHttps ? 'HTTPS' : 'HTTP'}:${config.port}`);
+server.listen(config.port, config.host, () => {
+  const bindHost = config.host || '0.0.0.0';
+  logger.info(`Black Mic Studio server on ${useHttps ? 'HTTPS' : 'HTTP'}://${bindHost}:${config.port}`);
 });

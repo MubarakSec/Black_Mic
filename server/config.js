@@ -33,6 +33,12 @@ function readInteger(value, fallback) {
   return parsed;
 }
 
+function readHost(value) {
+  const host = String(value || '').trim();
+  if (host.length === 0) return undefined;
+  return host;
+}
+
 function readPositiveInteger(value, fallback) {
   const parsed = readInteger(value, fallback);
   if (parsed <= 0) return fallback;
@@ -42,5 +48,6 @@ function readPositiveInteger(value, fallback) {
 module.exports = {
   corsOrigin: readAllowedOrigins(process.env.BMS_ALLOWED_ORIGINS, process.env.NODE_ENV),
   port: readPositiveInteger(process.env.PORT, DEFAULT_PORT),
+  host: readHost(process.env.BMS_HOST),
   maxSocketPayloadBytes: readPositiveNumber(process.env.BMS_MAX_SOCKET_PAYLOAD_MB, DEFAULT_MAX_SOCKET_PAYLOAD_MB) * 1024 * 1024,
 };
