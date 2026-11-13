@@ -6,9 +6,8 @@ const { routeEasyEffects } = require('./easyeffects-router');
 const { logger } = require('./logger');
 
 const DEFAULT_SAMPLE_RATE = 48000;
-const MONO_CHANNEL_COUNT = 1;
+const { PCM_BYTES_PER_SAMPLE, MONO_CHANNEL_COUNT } = require('./protocol');
 const MONO_CHANNEL_MAP = 'mono';
-const PCM_BYTES_PER_SAMPLE = 2;
 const AUDIO_WORKLET_BATCH_FRAMES = 512;
 const PCM_FLUSH_THRESHOLD_BYTES = AUDIO_WORKLET_BATCH_FRAMES * PCM_BYTES_PER_SAMPLE;
 const DEFAULT_EASYEFFECTS_ROOM_ID = 'ROOM';

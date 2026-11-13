@@ -1,7 +1,7 @@
 'use strict';
 
-const PCM_BYTES_PER_SAMPLE = 2;
-const STEREO_BYTES_PER_MONO_SAMPLE = 4;
+const { PCM_BYTES_PER_SAMPLE } = require('./protocol');
+const STEREO_BYTES_PER_MONO_SAMPLE = PCM_BYTES_PER_SAMPLE * 2;
 
 function upmixMonoToStereoBuffer(pcmBuffer) {
   if (!Buffer.isBuffer(pcmBuffer)) return Buffer.alloc(0);
