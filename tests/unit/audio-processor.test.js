@@ -36,13 +36,14 @@ function loadProcessorClass() {
   return ProcessorClass;
 }
 
-function createProcessor() {
+function createProcessor(overrides = {}) {
   const ProcessorClass = loadProcessorClass();
-  return new ProcessorClass({ processorOptions: { isStereo: false } });
+  return new ProcessorClass({ processorOptions: { isStereo: false, ...overrides } });
 }
 
 const BATCH_FRAMES = 512;
 const CALLS_TO_FILL_BATCH = BATCH_FRAMES / QUANTUM_FRAMES;
+const STEREO_BUFFER_BYTES = BATCH_FRAMES * 2 * 2;
 
 function processMonoSample(processor, sample) {
   const input = [new Float32Array(QUANTUM_FRAMES).fill(sample)];
@@ -65,7 +66,19 @@ function configureNoiseReduction(processor, enabled, noiseFloorRms) {
   });
 }
 
+function processStereoSample(processor, sample) {
+  const input = [new Float32Array(QUANTUM_FRAMES).fill(sample)];
+
+  for (let i = 0; i < CALLS_TO_FILL_BATCH; i++) {
+    processor.process([input], [], {});
+  }
+
+  const lastCallArgs = processor.port.postMessage.mock.calls.at(-1);
+  return new Int16Array(lastCallArgs[0].buffer);
+}
+
 describe('AudioProcessor PCM encoding', () => {
+
   it('preserves low-level input without chopping it', () => {
     const pcm = processMonoSample(createProcessor(), IDLE_NOISE_SAMPLE);
 
@@ -85,6 +98,17 @@ describe('AudioProcessor PCM encoding', () => {
     const pcm = processMonoSample(processor, IDLE_NOISE_SAMPLE);
 
     expect(Math.max(...pcm.map(Math.abs))).toBeGreaterThan(PCM_IDLE_NOISE_FLOOR);
+  });
+
+  it('duplicates mono input into stereo when stereo is configured but the device delivers mono', () => {
+    const processor = createProcessor({ isStereo: true });
+    const pcm = processStereoSample(processor, VOICE_SAMPLE);
+
+    expect(pcm.buffer.byteLength).toBe(STEREO_BUFFER_BYTES);
+    // Interleaved L/R samples are the same mono sample ±1 LSB of independent dither
+    expect(Math.abs(pcm[0] - pcm[1])).toBeLessThanOrEqual(1);
+    expect(Math.abs(pcm[2] - pcm[3])).toBeLessThanOrEqual(1);
+    expect(Math.abs(pcm[0])).toBeGreaterThan(PCM_VOICE_FLOOR);
   });
 
   it('smoothly attenuates audio at the calibrated fan-noise floor', () => {

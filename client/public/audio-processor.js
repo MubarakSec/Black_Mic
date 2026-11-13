@@ -27,7 +27,9 @@ function tpdfDither(rng = Math.random) {
 
 function floatToInt16(sample) {
   const clamped = clampSample(sample + tpdfDither());
-  return clamped < 0 ? clamped * PCM_NEGATIVE_SCALE : clamped * PCM_POSITIVE_SCALE;
+  return clamped < 0
+    ? Math.round(clamped * PCM_NEGATIVE_SCALE)
+    : Math.round(clamped * PCM_POSITIVE_SCALE);
 }
 
 class AudioProcessor extends AudioWorkletProcessor {
@@ -47,6 +49,7 @@ class AudioProcessor extends AudioWorkletProcessor {
 
     this.peak = 0;
     this.sumSquares = 0;
+    this.sumSquaresDivisor = 0;
     this.clippedSamples = 0;
 
     // Listen for returned buffers from the main thread to recycle them
@@ -117,13 +120,30 @@ class AudioProcessor extends AudioWorkletProcessor {
     const channelLength = input[0]?.length;
     if (!channelLength) return true;
 
-    const isStereoActive = this.isStereo && input.length >= 2;
+    const wantsStereo = this.isStereo;
+    const isStereoActive = wantsStereo && input.length >= 2;
+    // Stereo configured but device delivered mono: duplicate mono into R
+    // (keeps buffer size, header channelCount, and telemetry consistent)
+    const isMonoDuplicatedToStereo = wantsStereo && input.length < 2;
     const reductionTarget = this.computeReductionTarget(input, channelLength);
 
     // Merge encoding + telemetry into a single loop
     const monoInput = input[0];
 
-    if (isStereoActive) {
+    if (isMonoDuplicatedToStereo) {
+      for (let i = 0; i < channelLength; i++) {
+        const offset = (this.frameOffset + i) * 2;
+        const gain = this.smoothGain(reductionTarget);
+        const sample = monoInput[i] * gain;
+        this.currentInt16Array[offset] = floatToInt16(sample);
+        this.currentInt16Array[offset + 1] = floatToInt16(sample);
+        const abs = Math.abs(sample);
+        if (abs > this.peak) this.peak = abs;
+        this.sumSquares += sample * sample;
+        if (abs >= 0.999) this.clippedSamples++;
+        this.sumSquaresDivisor += 1;
+      }
+    } else if (isStereoActive) {
       const stereoInput1 = input[1];
       for (let i = 0; i < channelLength; i++) {
         const offset = (this.frameOffset + i) * 2;
@@ -133,9 +153,12 @@ class AudioProcessor extends AudioWorkletProcessor {
         this.currentInt16Array[offset] = floatToInt16(sample);
         this.currentInt16Array[offset + 1] = floatToInt16(stereoSample);
         const abs = Math.abs(sample);
+        const absR = Math.abs(stereoSample);
         if (abs > this.peak) this.peak = abs;
-        this.sumSquares += sample * sample;
-        if (abs >= 0.999) this.clippedSamples++;
+        if (absR > this.peak) this.peak = absR;
+        this.sumSquares += sample * sample + stereoSample * stereoSample;
+        if (abs >= 0.999 || absR >= 0.999) this.clippedSamples++;
+        this.sumSquaresDivisor += 2;
       }
     } else {
       for (let i = 0; i < channelLength; i++) {
@@ -146,6 +169,7 @@ class AudioProcessor extends AudioWorkletProcessor {
         if (abs > this.peak) this.peak = abs;
         this.sumSquares += sample * sample;
         if (abs >= 0.999) this.clippedSamples++;
+        this.sumSquaresDivisor += 1;
       }
     }
 
@@ -160,7 +184,7 @@ class AudioProcessor extends AudioWorkletProcessor {
       this.currentInt16Array = new Int16Array(this.currentBuffer);
       this.frameOffset = 0;
 
-      const rms = Math.sqrt(this.sumSquares / actualFrames);
+      const rms = Math.sqrt(this.sumSquares / Math.max(1, this.sumSquaresDivisor));
       const peakDb = 20 * Math.log10(Math.max(this.peak, 1e-8));
       const rmsDb = 20 * Math.log10(Math.max(rms, 1e-8));
       const clipped = this.clippedSamples;
@@ -175,6 +199,7 @@ class AudioProcessor extends AudioWorkletProcessor {
 
       this.peak = 0;
       this.sumSquares = 0;
+      this.sumSquaresDivisor = 0;
       this.clippedSamples = 0;
     }
 
