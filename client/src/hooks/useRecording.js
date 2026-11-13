@@ -47,28 +47,38 @@ export function useRecording({ destRef, addLog }) {
       : 'audio/webm';
     audioChunksRef.current = [];
     keepStoppedRecordingRef.current = true;
-    audioRecorderRef.current = new MediaRecorder(audioStream, { mimeType, audioBitsPerSecond: RECORDING_BITRATE_BPS });
+    try {
+      audioRecorderRef.current = new MediaRecorder(audioStream, { mimeType, audioBitsPerSecond: RECORDING_BITRATE_BPS });
+    } catch (err) {
+      addLog(`❌ Could not start recording: ${err.message}`);
+      setIsAudioRecording(false);
+      return;
+    }
     audioRecorderRef.current.ondataavailable = (e) => {
       if (e.data.size > 0) audioChunksRef.current.push(e.data);
     };
     audioRecorderRef.current.onstop = () => {
       const blob = new Blob(audioChunksRef.current, { type: mimeType });
+      if (!keepStoppedRecordingRef.current) {
+        // Disconnected/reset mid-take: discard silently, don't auto-download
+        addLog('🧹 Take discarded (session ended).');
+        audioChunksRef.current = [];
+        audioRecorderRef.current = null;
+        return;
+      }
       const url = URL.createObjectURL(blob);
       const sizeMB = (blob.size / (1024 * 1024)).toFixed(2);
       const recordingId = Date.now();
-      if (keepStoppedRecordingRef.current) {
-        setRecordings(prev => [{
-          id: recordingId, url, timestamp: new Date().toLocaleTimeString(),
-          duration: 'Audio only', size: `${sizeMB} MB`, mimeType,
-          filename: `bms-audio-${recordingId}`,
-        }, ...prev]);
-      }
+      setRecordings(prev => [{
+        id: recordingId, url, timestamp: new Date().toLocaleTimeString(),
+        duration: 'Audio only', size: `${sizeMB} MB`, mimeType,
+        filename: `bms-audio-${recordingId}`,
+      }, ...prev]);
       addLog(`💾 Audio take saved (${sizeMB} MB)`);
       const a = document.createElement('a');
       a.href = url;
       a.download = `bms-audio-${recordingId}.webm`;
       a.click();
-      if (!keepStoppedRecordingRef.current) URL.revokeObjectURL(url);
       audioChunksRef.current = [];
       audioRecorderRef.current = null;
     };
