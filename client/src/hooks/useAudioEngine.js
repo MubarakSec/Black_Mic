@@ -19,7 +19,6 @@ import {
   ROLE_RECEIVER,
   CHANNEL_MODE_STEREO,
   PROFILE_RAW,
-  PROFILE_CLEAN,
   PROFILE_FAN,
   PROFILE_CALL,
 } from '../constants';
@@ -27,6 +26,7 @@ import { getAudioSetupError } from '../utils/getAudioSetupError';
 import { createAudioKeepalive } from '../utils/audioKeepalive';
 import { playAlarmBeep, playUnlockBeep } from '../utils/audioCues';
 import { startVisualizerLoop } from '../utils/visualizerEngine';
+import { connectProfileInput, createPeakLimiter } from '../utils/audioProfileGraph';
 
 export function useAudioEngine({
   role,
@@ -273,46 +273,15 @@ export function useAudioEngine({
       });
       processorRef.current = workletNode;
 
-      const connectProfileInput = () => {
-        if (audioProfile === PROFILE_CLEAN) {
-          const highPass = audioContextRef.current.createBiquadFilter();
-          highPass.type = 'highpass';
-          highPass.frequency.value = 80;
-          highPass.Q.value = 0.7;
+      connectProfileInput({
+        audioContext: audioContextRef.current,
+        source,
+        gainNode: senderGainNodeRef.current,
+        audioProfile,
+      });
 
-          const compressor = audioContextRef.current.createDynamicsCompressor();
-          compressor.threshold.value = -18;
-          compressor.knee.value = 8;
-          compressor.ratio.value = 3;
-          compressor.attack.value = 0.005;
-          compressor.release.value = 0.18;
-
-          source.connect(highPass);
-          highPass.connect(compressor);
-          compressor.connect(senderGainNodeRef.current);
-          return;
-        }
-        if (audioProfile === PROFILE_FAN) {
-          const highPass = audioContextRef.current.createBiquadFilter();
-          highPass.type = 'highpass';
-          highPass.frequency.value = 80;
-          highPass.Q.value = 0.7;
-
-          source.connect(highPass);
-          highPass.connect(senderGainNodeRef.current);
-          return;
-        }
-        source.connect(senderGainNodeRef.current);
-      };
-      connectProfileInput();
-      
       // Keep RAW untouched for external processing; other profiles get peak protection.
-      const limiter = audioContextRef.current.createDynamicsCompressor();
-      limiter.threshold.value = -3;
-      limiter.knee.value = 0;
-      limiter.ratio.value = 20;
-      limiter.attack.value = 0.002;
-      limiter.release.value = 0.08;
+      const limiter = createPeakLimiter(audioContextRef.current);
       noiseAnalysisAnalyserRef.current = audioContextRef.current.createAnalyser();
       noiseAnalysisAnalyserRef.current.fftSize = 256;
 
