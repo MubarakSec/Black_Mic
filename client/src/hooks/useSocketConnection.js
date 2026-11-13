@@ -60,10 +60,12 @@ export function useSocketConnection({
   const roleRef = useRef(role);
   const roomIdRef = useRef(roomId);
   const inputGainRef = useRef(inputGain);
+  const isSignalLostRef = useRef(isSignalLost);
   const isSenderAudioReadyRef = useRef(isSenderAudioReady);
   const remoteAckTimerRef = useRef(null);
 
   useEffect(() => { roleRef.current = role; }, [role]);
+  useEffect(() => { isSignalLostRef.current = isSignalLost; }, [isSignalLost]);
   useEffect(() => { roomIdRef.current = roomId; }, [roomId]);
   useEffect(() => { inputGainRef.current = inputGain; }, [inputGain]);
   useEffect(() => { isSenderAudioReadyRef.current = isSenderAudioReady; }, [isSenderAudioReady]);
@@ -175,10 +177,12 @@ export function useSocketConnection({
       setStatus(senderStatus);
     });
 
+    const MAX_SERVER_WARNING_LENGTH = 240;
     socket.on('server-warning', (payload) => {
       if (!payload || typeof payload.message !== 'string') return;
-      setOperatorIssue(payload.message);
-      addLog(`⚠️ ${payload.message}`);
+      const message = payload.message.slice(0, MAX_SERVER_WARNING_LENGTH);
+      setOperatorIssue(message);
+      addLog(`⚠️ ${message}`);
     });
 
     socket.on('virtual-mic-state', (payload) => {
@@ -328,13 +332,13 @@ export function useSocketConnection({
 
       const silenceDuration = performance.now() - lastChunkTimeRef.current;
       if (silenceDuration > SILENCE_THRESHOLD_MS) {
-        if (isSignalLost) return;
+        if (isSignalLostRef.current) return;
         setIsSignalLost(true);
         setStatus(STATUS_MESSAGES.receiverSignalLost);
         return;
       }
 
-      if (!isSignalLost) return;
+      if (!isSignalLostRef.current) return;
       setIsSignalLost(false);
       setStatus(STATUS_MESSAGES.receiverStreaming);
     }, WATCHDOG_CHECK_INTERVAL_MS);
@@ -343,7 +347,7 @@ export function useSocketConnection({
       clearInterval(watchdog);
       setIsSignalLost(false);
     };
-  }, [role, isSignalLost, lastChunkTimeRef, hasConnectedOnceRef, setIsSignalLost, setStatus]);
+  }, [role, lastChunkTimeRef, hasConnectedOnceRef, setIsSignalLost, setStatus]);
 
   return {
     socketRef,
