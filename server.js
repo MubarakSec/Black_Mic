@@ -10,9 +10,10 @@ const fs = require('fs');
 const config = require('./server/config');
 const { createRoomRegistry } = require('./server/room-registry');
 const { createShutdownHandler } = require('./server/shutdown-handler');
+const { logger } = require('./server/logger');
 
 process.on('unhandledRejection', (reason) => {
-  console.error('[BMS] Unhandled Rejection:', reason);
+  logger.error('Unhandled Rejection:', reason);
 });
 const recording = require('./server/recording');
 const {
@@ -50,7 +51,7 @@ const shutdownHandler = createShutdownHandler({ server, io, recording });
 shutdownHandler.registerSignalListeners();
 
 process.on('uncaughtException', (err) => {
-  console.error('[BMS] Uncaught Exception:', err);
+  logger.error('Uncaught Exception:', err);
   shutdownHandler.handleShutdown('uncaughtException');
 });
 
@@ -93,11 +94,11 @@ function respondToJoin(acknowledge, payload) {
 }
 
 io.on('connection', (socket) => {
-  console.log('Client connected:', socket.id);
+  logger.info('Client connected:', socket.id);
 
   socket.on('join-room', (roomId, role, acknowledge) => {
     if (!isValidRoomId(roomId)) {
-      console.warn(`Blocked invalid join-room: "${roomId}" from ${socket.id}`);
+      logger.warn(`Blocked invalid join-room: "${roomId}" from ${socket.id}`);
       respondToJoin(acknowledge, {
         ok: false,
         code: INVALID_ROOM_CODE,
@@ -106,7 +107,7 @@ io.on('connection', (socket) => {
       return;
     }
     if (!isValidRole(role)) {
-      console.warn(`Blocked invalid join-room role: "${role}" from ${socket.id}`);
+      logger.warn(`Blocked invalid join-room role: "${role}" from ${socket.id}`);
       respondToJoin(acknowledge, {
         ok: false,
         code: INVALID_ROLE_CODE,
@@ -130,7 +131,7 @@ io.on('connection', (socket) => {
     }
 
     socket.join(roomId);
-    console.log(`[${role || 'unknown'}] ${socket.id} joined room: ${roomId}`);
+    logger.info(`[${role || 'unknown'}] ${socket.id} joined room: ${roomId}`);
     respondToJoin(acknowledge, { ok: true });
 
     // Create virtual PipeWire sink when any client joins
@@ -151,7 +152,7 @@ io.on('connection', (socket) => {
           sourceName: `BlackMic_${roomId}`,
         });
       }).catch(err => {
-        console.error(`[BMS] initRoom failed for ${roomId}:`, err);
+        logger.error(`initRoom failed for ${roomId}:`, err);
         const message = `Virtual microphone setup failed for room ${roomId}.`;
         warnSocket(socket, message);
         socket.emit('virtual-mic-state', { roomId, ready: false, message });
@@ -213,20 +214,20 @@ io.on('connection', (socket) => {
   });
 
   socket.on('disconnect', () => {
-    console.log('Client disconnected:', socket.id);
+    logger.info('Client disconnected:', socket.id);
     leaveCurrentRoom(socket);
   });
 });
 
 server.on('error', (error) => {
   if (error.code === 'EADDRINUSE') {
-    console.error(`[BMS] Port ${config.port} is already in use. Set PORT to use a different port.`);
+    logger.error(`Port ${config.port} is already in use. Set PORT to use a different port.`);
     process.exit(1);
   }
-  console.error('[BMS] Server failed:', error.message);
+  logger.error('Server failed:', error.message);
   process.exit(1);
 });
 
 server.listen(config.port, () => {
-  console.log(`Black Mic Studio server on ${useHttps ? 'HTTPS' : 'HTTP'}:${config.port}`);
+  logger.info(`Black Mic Studio server on ${useHttps ? 'HTTPS' : 'HTTP'}:${config.port}`);
 });

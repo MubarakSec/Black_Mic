@@ -1,6 +1,7 @@
 'use strict';
 
 const config = require('./config');
+const { logger } = require('./logger');
 
 const ROOM_ID_REGEX = /^[A-Z0-9]{3,12}$/;
 const VALID_ROLES = new Set(['sender', 'receiver']);
@@ -63,7 +64,7 @@ function normalizePcmChunk(chunk) {
 
   const frameSize = PCM_BYTES_PER_SAMPLE * channelCount;
   if (pcmBuffer.byteLength % frameSize !== 0) {
-    console.warn(`[BMS] Dropping PCM chunk: payload alignment mismatch (${pcmBuffer.byteLength} bytes, frame=${frameSize})`);
+    logger.warn(`Dropping PCM chunk: payload alignment mismatch (${pcmBuffer.byteLength} bytes, frame=${frameSize})`);
     return null;
   }
 

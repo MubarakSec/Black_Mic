@@ -3,6 +3,7 @@
 const { spawn } = require('child_process');
 const { downmixStereoToMonoBuffer } = require('./pcm-utils');
 const { routeEasyEffects } = require('./easyeffects-router');
+const { logger } = require('./logger');
 
 const DEFAULT_SAMPLE_RATE = 48000;
 const MONO_CHANNEL_COUNT = 1;
@@ -78,7 +79,7 @@ async function initRoom(roomId) {
 
     if (codeSink !== 0) {
       const message = `Failed to create virtual sink for room ${roomId}. Is PipeWire/PulseAudio pactl available?`;
-      console.error(`[BMS] ${message}`);
+      logger.error(message);
       return { ok: false, message };
     }
 
@@ -90,7 +91,7 @@ async function initRoom(roomId) {
     ]);
 
     if (codeSource !== 0) {
-      console.warn(`[BMS] Failed to create remap source. Rolling back null-sink module.`);
+      logger.warn(`Failed to create remap source. Rolling back null-sink module.`);
       await pactlRunner(['unload-module', sinkModuleId]);
       return { ok: false, message: `Failed to create remap source for room ${roomId}.` };
     }
@@ -119,9 +120,9 @@ async function initRoom(roomId) {
     if (roomId === EASYEFFECTS_ROOM_ID) {
       const routed = await routeEasyEffects(sourceName);
       const routeStatus = routed ? 'connected' : 'not available';
-      console.log(`[BMS] EasyEffects route ${routeStatus}: ${sourceName}`);
+      logger.info(`EasyEffects route ${routeStatus}: ${sourceName}`);
     }
-    console.log(`[BMS] Virtual mic ready: Black Mic (modules ${sinkModuleId}, ${sourceModuleId || 'none'})`);
+    logger.info(`Virtual mic ready: Black Mic (modules ${sinkModuleId}, ${sourceModuleId || 'none'})`);
     return { ok: true };
   })();
 
@@ -150,7 +151,7 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
 
   // Restart bridge if sample rate changes mid-stream
   if (s.audioBridge && s.sampleRate !== sampleRate) {
-    console.log(`[BMS] Format changed from ${s.sampleRate}Hz to ${sampleRate}Hz. Restarting bridge...`);
+    logger.info(`Format changed from ${s.sampleRate}Hz to ${sampleRate}Hz. Restarting bridge...`);
     if (s.audioBridge.stdin.writable) s.audioBridge.stdin.end();
     s.audioBridge = null;
   }
@@ -170,13 +171,13 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
     ], { stdio: ['pipe', 'ignore', 'ignore'] });
     s.audioBridge = audioBridge;
     s.isDraining = false;
-    audioBridge.on('error', e => console.error('[BMS] Audio bridge error:', e.message));
+    audioBridge.on('error', e => logger.error('Audio bridge error:', e.message));
     audioBridge.stdin.on('error', err => {
       if (err.code === 'EPIPE') {
-        console.error('[BMS] EPIPE on pacat. The bridge died, will restart next frame.');
+        logger.error('EPIPE on pacat. The bridge died, will restart next frame.');
         if (s.audioBridge === audioBridge) resetBridgeState(s, audioBridge);
       } else {
-        console.error('[BMS] Stdin error:', err.message);
+        logger.error('Stdin error:', err.message);
       }
     });
     audioBridge.stdin.on('drain', () => {
@@ -187,7 +188,7 @@ function feedAudio(roomId, pcmBuffer, sampleRate, channelCount) {
       if (s.audioBridge !== audioBridge) return;
       resetBridgeState(s, audioBridge);
     });
-    console.log(`[BMS] pacat audio bridge: ${sampleRate}Hz mono -> ${s.sinkName}`);
+    logger.info(`pacat audio bridge: ${sampleRate}Hz mono -> ${s.sinkName}`);
   }
 
   // Downmix stereo to mono for the PipeWire sink (always mono)
@@ -242,7 +243,7 @@ async function cleanupRoom(roomId) {
   const cleanupPromise = (async () => {
     if (s.sourceModuleId) await pactlRunner(['unload-module', s.sourceModuleId]);
     if (s.sinkModuleId) await pactlRunner(['unload-module', s.sinkModuleId]);
-    console.log(`[BMS] Virtual mic unloaded (modules ${s.sinkModuleId}, ${s.sourceModuleId || 'none'})`);
+    logger.info(`Virtual mic unloaded (modules ${s.sinkModuleId}, ${s.sourceModuleId || 'none'})`);
   })();
   const trackedCleanup = cleanupPromise.finally(() => {
     if (cleaningRooms.get(roomId) !== trackedCleanup) return;
